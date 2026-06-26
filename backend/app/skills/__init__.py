@@ -12,8 +12,10 @@ def get_all_skills():
     global _skills_registry
     if _skills_registry is None:
         from app.modules.inventory.skill import InventorySkill
+        from app.modules.taobao.tools import TaobaoSkill
         _skills_registry = {
             "inventory": InventorySkill(),
+            "taobao": TaobaoSkill(),
         }
     return _skills_registry
 
