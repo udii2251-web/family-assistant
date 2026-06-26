@@ -103,8 +103,10 @@ class TaobaoSyncManager:
             # Navigate to orders page
             page = await playwright_manager.goto_orders_page()
 
-            # Wait for page load
-            await page.wait_for_load_state('networkidle')
+            # Wait for page load (use 'domcontentloaded' instead of 'networkidle')
+            await page.wait_for_load_state('domcontentloaded')
+            # Additional wait for dynamic content
+            await page.wait_for_timeout(3000)
 
             # Extract orders
             orders = await self._extract_orders(page, days)
@@ -148,7 +150,7 @@ class TaobaoSyncManager:
             self._sync_in_progress = False
 
     async def _extract_orders(self, page, days: int) -> List[Dict]:
-        """Extract order data from orders page.
+        """Extract order data from orders page using JavaScript.
 
         Args:
             page: Playwright page object
@@ -161,30 +163,114 @@ class TaobaoSyncManager:
         cutoff_date = datetime.now() - timedelta(days=days)
 
         try:
-            # Wait for order list to load
-            await page.wait_for_selector('.order-list, .bought-wrapper', timeout=10000)
+            # Wait for page to stabilize
+            await page.wait_for_timeout(5000)
 
-            # Get all order items
-            order_elements = await page.query_selector_all('.order-item, .bought-table-mod__table___2pVsn')
+            # Execute JavaScript to extract order data directly
+            orders_raw = await page.evaluate('''
+                () => {
+                    const orders = [];
 
-            logger.info(f"Found {len(order_elements)} order elements")
+                    // Find order rows
+                    const rows = document.querySelectorAll('tr, div[class*="item"], div[class*="order"]');
 
-            for order_elem in order_elements:
-                try:
-                    order_data = await self._parse_order_element(order_elem, cutoff_date)
+                    rows.forEach(row => {
+                        const text = row.textContent || '';
 
-                    if order_data:
-                        orders.append(order_data)
-                        logger.info(f"Parsed order: {order_data.get('order_id')}")
+                        // Find order ID (18-19 digits)
+                        const orderMatch = text.match(/\\d{18,19}/);
+                        if (orderMatch) {
+                            const orderId = orderMatch[0];
 
-                except Exception as e:
-                    logger.warning(f"Failed to parse order element: {e}")
+                            // Extract price
+                            const priceMatch = text.match(/[¥￥](\\d+\\.\\d{2})/);
+                            const price = priceMatch ? parseFloat(priceMatch[1]) : 0;
+
+                            // Extract time
+                            const timeMatch = text.match(/(2026|2025)-\\d{2}-\\d{2}/);
+                            const time = timeMatch ? timeMatch[0] : '';
+
+                            // Extract product name (after order ID, before shop name)
+                            const productMatch = text.match(/订单号:\\s*\\d+[\\s\\S]{10,100}/);
+                            let product = '';
+                            if (productMatch) {
+                                const segment = productMatch[0];
+                                // Remove order ID and common keywords
+                                product = segment
+                                    .replace(/订单号:\\s*\\d+/, '')
+                                    .replace(/旺旺在线|订单详情|卖家已发货|交易成功|交易关闭/g, '')
+                                    .substring(0, 50);
+                            }
+
+                            // Extract shop name
+                            const shopMatch = text.match(/(旗舰店|超市|专卖店|专营店)/);
+                            const shop = shopMatch ? shopMatch[0] : '';
+
+                            // Extract status
+                            let status = '';
+                            if (text.includes('已发货')) status = '已发货';
+                            else if (text.includes('交易成功')) status = '交易成功';
+                            else if (text.includes('交易关闭')) status = '交易关闭';
+                            else if (text.includes('待付款')) status = '待付款';
+                            else if (text.includes('待发货')) status = '待发货';
+
+                            if (price > 0 || time) {
+                                orders.push({
+                                    order_id: orderId,
+                                    product_name: product.trim(),
+                                    shop_name: shop.trim(),
+                                    total_price: price,
+                                    order_time: time,
+                                    status: status
+                                });
+                            }
+                        }
+                    });
+
+                    return orders;
+                }
+            ''')
+
+            logger.info(f"Found {len(orders_raw)} raw orders from page")
+
+            # Filter by date and deduplicate
+            seen_ids = set()
+            for order_data in orders_raw:
+                # Skip duplicates
+                if order_data['order_id'] in seen_ids:
+                    continue
+                seen_ids.add(order_data['order_id'])
+
+                # Parse time
+                order_time = None
+                if order_data.get('order_time'):
+                    try:
+                        order_time = datetime.strptime(order_data['order_time'], '%Y-%m-%d')
+                    except:
+                        pass
+
+                # Filter by date
+                if order_time and order_time < cutoff_date:
                     continue
 
+                # Map status
+                status_text = order_data.get('status', '')
+                status = self.ORDER_STATUS_MAP.get(status_text, status_text.lower() if status_text else 'unknown')
+
+                orders.append({
+                    'order_id': order_data['order_id'],
+                    'product_name': order_data.get('product_name', ''),
+                    'shop_name': order_data.get('shop_name', ''),
+                    'total_price': order_data.get('total_price', 0.0),
+                    'order_time': order_time,
+                    'status': status
+                })
+
+            logger.info(f"Filtered to {len(orders)} orders within {days} days")
             return orders
 
         except Exception as e:
-            logger.error(f"Failed to extract orders: {e}")
+            logger.error(f"Failed to extract orders: {e}", exc_info=True)
             return []
 
     async def _parse_order_element(self, order_elem, cutoff_date: datetime) -> Optional[Dict]:

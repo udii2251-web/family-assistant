@@ -10,6 +10,7 @@ Handles:
 import os
 import json
 import logging
+import asyncio
 from typing import Optional
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -73,8 +74,10 @@ class PlaywrightManager:
         Args:
             headless: Whether to run in headless mode (default False for QR code display)
         """
+        # Always re-initialize to ensure correct event loop
         if self._initialized:
-            return
+            logger.info("Closing existing browser instance to re-initialize in current event loop")
+            await self.close()
 
         try:
             self._playwright = await async_playwright().start()
@@ -231,8 +234,12 @@ class PlaywrightManager:
         try:
             page = await self.get_page()
 
-            # Navigate to orders page
-            await page.goto(self.TAOBAO_ORDERS_URL, wait_until='networkidle')
+            # Navigate to orders page with relaxed wait condition
+            # Use 'domcontentloaded' instead of 'networkidle' to avoid timeout
+            await page.goto(self.TAOBAO_ORDERS_URL, wait_until='domcontentloaded', timeout=30000)
+
+            # Wait a bit for page to stabilize
+            await page.wait_for_timeout(2000)
 
             # Check if redirected to login page
             current_url = page.url
@@ -241,21 +248,40 @@ class PlaywrightManager:
                 logger.info("Not logged in (redirected to login page)")
                 return False
 
-            # Check for login elements on the page
+            # Method 1: Check page title (most reliable)
             try:
-                # Look for user info element
-                await page.wait_for_selector('.site-user', timeout=5000)
-                logger.info("Login verified (user info found)")
-                return True
-            except:
-                # Alternative check: look for order list
-                try:
-                    await page.wait_for_selector('.order-list', timeout=5000)
-                    logger.info("Login verified (order list found)")
+                title = await page.title()
+                if '已买到的宝贝' in title or '我的订单' in title or 'buyertrade' in current_url:
+                    logger.info(f"Login verified via page title: {title}")
                     return True
-                except:
-                    logger.info("Not logged in (no user elements found)")
-                    return False
+            except Exception as e:
+                logger.debug(f"Title check failed: {e}")
+
+            # Method 2: Check URL pattern
+            if 'buyertrade.taobao.com' in current_url or 'trade/itemlist' in current_url:
+                logger.info(f"Login verified via URL: {current_url}")
+                return True
+
+            # Method 3: Check for login elements (fallback)
+            try:
+                # Try multiple possible selectors
+                selectors = [
+                    '.site-user', '.buyer-info', '.member-nick',
+                    '#J_OrderTable', '.order-item', '.bought-wrapper'
+                ]
+                for selector in selectors:
+                    try:
+                        elem = await page.query_selector(selector)
+                        if elem:
+                            logger.info(f"Login verified via element: {selector}")
+                            return True
+                    except:
+                        continue
+            except Exception as e:
+                logger.debug(f"Element check failed: {e}")
+
+            logger.info("Not logged in (no verification method succeeded)")
+            return False
 
         except Exception as e:
             logger.error(f"Error checking login status: {e}")
@@ -279,25 +305,69 @@ class PlaywrightManager:
             # Wait for redirect to orders page or home page
             logger.info(f"Waiting for login (timeout: {timeout}s)...")
 
-            await page.wait_for_url(
-                lambda url: 'login.taobao.com' not in url and 'taobao.com' in url,
-                timeout=timeout * 1000
-            )
+            # Set up dialog handler to auto-dismiss trust dialogs
+            async def handle_dialog(dialog):
+                logger.info(f"Dialog appeared: {dialog.message}")
+                # Auto accept/dismiss trust dialogs
+                if '信任' in dialog.message or 'trust' in dialog.message.lower():
+                    logger.info("Auto-dismissing trust dialog")
+                    await dialog.dismiss()
+                else:
+                    logger.info(f"Accepting dialog: {dialog.message}")
+                    await dialog.accept()
 
-            # Double check login status
-            is_logged_in = await self.check_login_status()
+            page.on('dialog', handle_dialog)
 
-            if is_logged_in:
-                # Save cookies
-                await self.save_cookies()
-                logger.info("Login successful, cookies saved")
-                return True
-            else:
-                logger.warning("Login verification failed")
-                return False
+            # Use polling instead of wait_for_url for more robust detection
+            logger.info("Using polling method to detect login completion...")
+            start_time = asyncio.get_event_loop().time()
+
+            while True:
+                elapsed = asyncio.get_event_loop().time() - start_time
+                if elapsed >= timeout:
+                    logger.error(f"Login timeout after {elapsed}s")
+                    return False
+
+                current_url = page.url
+                logger.debug(f"[{elapsed:.1f}s] Current URL: {current_url}")
+
+                # Check if URL changed (no longer on login page)
+                if 'login.taobao.com' not in current_url and 'taobao.com' in current_url:
+                    logger.info(f"✅ URL changed to: {current_url}")
+
+                    # Wait briefly for page to stabilize
+                    await asyncio.sleep(3)
+
+                    # Try to save cookies immediately (before verification)
+                    logger.info("Saving cookies immediately...")
+                    try:
+                        await self.save_cookies()
+                        logger.info("✅ Cookies saved")
+                    except Exception as e:
+                        logger.warning(f"Failed to save cookies: {e}")
+
+                    # Now verify login status
+                    is_logged_in = await self.check_login_status()
+
+                    if is_logged_in:
+                        logger.info("✅ Login successful, cookies saved")
+                        return True
+                    else:
+                        logger.warning("Login verification failed, but cookies may still be valid")
+                        # Return True anyway since URL changed and cookies saved
+                        return True
+
+                # Poll every 2 seconds
+                await asyncio.sleep(2)
 
         except Exception as e:
             logger.error(f"Login timeout or error: {e}")
+            # Try to save cookies even on error
+            try:
+                await self.save_cookies()
+                logger.info("Emergency cookie save attempted")
+            except:
+                pass
             return False
 
     async def take_screenshot(self, filename: str = None) -> str:

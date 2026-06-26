@@ -294,20 +294,27 @@ async def _login_taobao(db: Session, args: Dict[str, Any]) -> str:
             f"无需重复登录。如需切换账号，请先登出。"
         )
 
-    # Start login process
-    # Note: This will open a browser window for QR code
-    # The actual login needs to be done in background process
-    return (
-        f"📱 淘宝登录流程启动\n\n"
-        f"请按以下步骤操作：\n"
-        f"1. 系统将打开浏览器窗口\n"
-        f"2. 使用淘宝APP扫描二维码\n"
-        f"3. 在手机上确认登录\n"
-        f"4. 登录成功后浏览器将自动关闭\n\n"
-        f"⏳ 正在等待扫码...\n"
-        f"（如5分钟内未扫码，登录将超时）\n\n"
-        f"💡 提示：登录后系统将自动同步最近7天的订单。"
-    )
+    # 直接在当前async上下文中运行登录流程
+    # execute_tool的ThreadPoolExecutor已经处理了async到sync的转换
+    try:
+        result = await taobao_auth_manager.login_with_qrcode(headless=False)
+        logger.info(f"Login result: {result}")
+
+        if result['success']:
+            return (
+                f"✅ 淘宝登录成功！\n\n"
+                f"账号：{result.get('user_nick', '未知')}\n\n"
+                f"💡 系统会自动同步最近7天的订单。"
+            )
+        else:
+            return (
+                f"❌ 淘宝登录失败\n\n"
+                f"原因：{result['message']}\n\n"
+                f"请重试或检查网络连接。"
+            )
+    except Exception as e:
+        logger.error(f"Login failed: {e}", exc_info=True)
+        return f"❌ 登录过程出错：{str(e)}"
 
 
 class TaobaoSkill:
@@ -362,13 +369,21 @@ class TaobaoSkill:
             str: Tool execution result
         """
         import asyncio
-        # Run async function synchronously
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+
+        # Check if we're already in an async context
         try:
-            return loop.run_until_complete(execute_taobao_tool(db, tool_name, tool_args))
-        finally:
-            loop.close()
+            loop = asyncio.get_running_loop()
+            # We're in async context - need to run in thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run,
+                    execute_taobao_tool(db, tool_name, tool_args)
+                )
+                return future.result()
+        except RuntimeError:
+            # No running loop - safe to create new one
+            return asyncio.run(execute_taobao_tool(db, tool_name, tool_args))
 
     def format_response(self, reply: str, actions: List[Dict], context: Dict) -> Dict:
         """Format response for Feishu.

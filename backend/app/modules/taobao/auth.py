@@ -138,34 +138,24 @@ class TaobaoAuthManager:
                         'message': '未登录'
                     }
 
-                # Check if cookie expired
+                # Check if cookie expired by database record
                 needs_reauth = False
                 if auth_status.login_expiry_time:
                     if datetime.now() > auth_status.login_expiry_time:
                         needs_reauth = True
-
-                # If marked as logged in, verify with browser
-                if auth_status.is_logged_in and not needs_reauth:
-                    # Initialize browser if needed
-                    if not playwright_manager._initialized:
-                        await playwright_manager.initialize(headless=True)
-
-                    # Check actual login status
-                    is_actually_logged_in = await playwright_manager.check_login_status()
-
-                    if not is_actually_logged_in:
-                        needs_reauth = True
                         auth_status.is_logged_in = False
                         auth_status.needs_reauth = True
-                        auth_status.status_message = "登录已失效"
+                        auth_status.status_message = "登录已过期"
                         db.commit()
 
+                # Trust database status - don't verify with browser to avoid event loop conflicts
+                # Only verify when actually syncing orders (in sync.py)
                 return {
                     'is_logged_in': auth_status.is_logged_in,
                     'user_nick': auth_status.user_nick or '',
                     'last_login_time': auth_status.last_login_time,
                     'expiry_time': auth_status.login_expiry_time,
-                    'needs_reauth': needs_reauth,
+                    'needs_reauth': needs_reauth or auth_status.needs_reauth,
                     'message': auth_status.status_message or ''
                 }
 
