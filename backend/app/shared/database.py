@@ -17,6 +17,8 @@ class Base(DeclarativeBase):
 def init_db():
     from app.modules.inventory.models import FamilyMember, ItemCategory, Item
     from app.modules.inventory.models import ConsumptionRecord, PurchaseRecord, RestockAlert
+    # Taobao module models
+    from app.modules.taobao.models import TaobaoOrder, TaobaoOrderItem, TaobaoAuthStatus
     # ProductComparison model is standalone, keep in shared location or move later
     try:
         from app.models.product_comparison import ProductComparison

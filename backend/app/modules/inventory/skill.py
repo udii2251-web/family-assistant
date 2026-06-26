@@ -9,6 +9,7 @@ Handles:
 """
 
 import json
+import logging
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -21,9 +22,12 @@ from app.modules.inventory.services import (
     get_inventory_overview,
     get_items_needing_restock,
     generate_restock_alerts,
+    convert_unit,
 )
 from app.services.product_search import ProductSearchService
 from app.feishu.card_builder import CardBuilder, ProductLink
+
+logger = logging.getLogger(__name__)
 
 
 class InventorySkill(BaseSkill):
@@ -92,159 +96,216 @@ class InventorySkill(BaseSkill):
         return get_inventory_tools()
 
     def execute_tool(self, db: Session, tool_name: str, tool_args: dict) -> str:
-        """Execute a tool call and return the result as a JSON string."""
+        """Execute a tool call and return the result as a JSON string.
+
+        Enhanced with:
+        - Detailed logging for each tool call
+        - Unit conversion support
+        - Better error handling
+        """
+        logger.info(f"🔧 Executing tool: {tool_name} with args: {tool_args}")
         today = date.today().isoformat()
 
-        if tool_name == "record_purchase":
-            item = self._find_or_create_item(db, tool_args["item_name"], tool_args["unit"])
-            purchase_date_str = tool_args.get("purchase_date", today)
-            purchase = PurchaseRecord(
-                item_id=item.id,
-                quantity=tool_args["quantity"],
-                unit=tool_args["unit"],
-                purchase_date=date.fromisoformat(purchase_date_str),
-            )
-            db.add(purchase)
-            db.commit()
+        try:
+            if tool_name == "record_purchase":
+                # Convert unit if needed
+                quantity = tool_args["quantity"]
+                unit = tool_args["unit"]
+                converted_qty, converted_unit = convert_unit(quantity, unit)
 
-            remaining = get_remaining_for_item(db, item.id)
-            avg_rate = get_avg_daily_rate(db, item.id)
-            days_info = ""
-            if avg_rate and avg_rate > 0 and remaining > 0:
-                days_info = f"，按消耗速度大概够用{int(remaining / avg_rate)}天"
-            return json.dumps({
-                "item": item.name,
-                "quantity": tool_args["quantity"],
-                "unit": tool_args["unit"],
-                "remaining": round(remaining, 2),
-                "days_info": days_info,
-            })
+                item = self._find_or_create_item(db, tool_args["item_name"], converted_unit)
+                purchase_date_str = tool_args.get("purchase_date", today)
+                purchase = PurchaseRecord(
+                    item_id=item.id,
+                    quantity=converted_qty,
+                    unit=converted_unit,
+                    purchase_date=date.fromisoformat(purchase_date_str),
+                )
+                db.add(purchase)
+                db.commit()
+                logger.info(f"✅ Purchase recorded: {converted_qty:.2f}{converted_unit} of {item.name}")
 
-        elif tool_name == "record_consumption":
-            item = self._find_or_create_item(db, tool_args["item_name"], tool_args["unit"])
-            record_date_str = tool_args.get("record_date", today)
-            consumption = ConsumptionRecord(
-                item_id=item.id,
-                quantity=tool_args["quantity"],
-                unit=tool_args["unit"],
-                record_date=date.fromisoformat(record_date_str),
-                note=tool_args.get("note", ""),
-                source="chat_import",
-            )
-            db.add(consumption)
-            db.commit()
-
-            remaining = get_remaining_for_item(db, item.id)
-            avg_rate = get_avg_daily_rate(db, item.id)
-            urgency = ""
-            if avg_rate and avg_rate > 0 and remaining > 0:
-                days = int(remaining / avg_rate)
-                if days <= 3:
-                    urgency = "，建议尽快补货！"
-                elif days <= 7:
-                    urgency = "，注意补货哦。"
-            return json.dumps({
-                "item": item.name,
-                "quantity": tool_args["quantity"],
-                "unit": tool_args["unit"],
-                "remaining": round(remaining, 2),
-                "urgency": urgency,
-            })
-
-        elif tool_name == "query_inventory":
-            if tool_args.get("item_name"):
-                item = db.query(Item).filter(Item.name.contains(tool_args["item_name"])).first()
-                if not item:
-                    return json.dumps({"found": False, "message": f"没找到{tool_args['item_name']}，可能还没录入系统"})
                 remaining = get_remaining_for_item(db, item.id)
                 avg_rate = get_avg_daily_rate(db, item.id)
-                days_until = None
+                days_info = ""
                 if avg_rate and avg_rate > 0 and remaining > 0:
-                    days_until = int(remaining / avg_rate)
+                    days_info = f"，按消耗速度大概够用{int(remaining / avg_rate)}天"
+
                 return json.dumps({
                     "item": item.name,
+                    "quantity": converted_qty,
+                    "unit": converted_unit,
                     "remaining": round(remaining, 2),
-                    "unit": item.unit,
-                    "avg_daily_rate": round(avg_rate or 0, 3),
-                    "days_until_empty": days_until,
+                    "days_info": days_info,
+                    "success": True,
                 })
-            else:
-                overview = get_inventory_overview(db)
-                items_info = [
+
+            elif tool_name == "record_consumption":
+                # Convert unit if needed
+                quantity = tool_args["quantity"]
+                unit = tool_args["unit"]
+                converted_qty, converted_unit = convert_unit(quantity, unit)
+
+                item = self._find_or_create_item(db, tool_args["item_name"], converted_unit)
+                record_date_str = tool_args.get("record_date", today)
+                consumption = ConsumptionRecord(
+                    item_id=item.id,
+                    quantity=converted_qty,
+                    unit=converted_unit,
+                    record_date=date.fromisoformat(record_date_str),
+                    note=tool_args.get("note", ""),
+                    source="chat_import",
+                )
+                db.add(consumption)
+                db.commit()
+                logger.info(f"✅ Consumption recorded: {converted_qty:.2f}{converted_unit} of {item.name}")
+
+                remaining = get_remaining_for_item(db, item.id)
+                avg_rate = get_avg_daily_rate(db, item.id)
+                urgency = ""
+                if avg_rate and avg_rate > 0 and remaining > 0:
+                    days = int(remaining / avg_rate)
+                    if days <= 3:
+                        urgency = "，建议尽快补货！"
+                    elif days <= 7:
+                        urgency = "，注意补货哦。"
+                elif remaining <= 0:
+                    urgency = "，库存已不足或为负数，请检查是否漏记采购！"
+
+                return json.dumps({
+                    "item": item.name,
+                    "quantity": converted_qty,
+                    "unit": converted_unit,
+                    "remaining": round(remaining, 2),
+                    "urgency": urgency,
+                    "success": True,
+                })
+
+            elif tool_name == "query_inventory":
+                if tool_args.get("item_name"):
+                    # Query specific item
+                    item = db.query(Item).filter(Item.name.contains(tool_args["item_name"])).first()
+                    if not item:
+                        logger.warning(f"❌ Item not found: {tool_args['item_name']}")
+                        return json.dumps({
+                            "found": False,
+                            "message": f"没找到{tool_args['item_name']}，可能还没录入系统",
+                            "success": False,
+                        })
+                    remaining = get_remaining_for_item(db, item.id)
+                    avg_rate = get_avg_daily_rate(db, item.id)
+                    days_until = None
+                    if avg_rate and avg_rate > 0 and remaining > 0:
+                        days_until = int(remaining / avg_rate)
+                    logger.info(f"📊 Queried {item.name}: {remaining:.1f}{item.unit} remaining")
+                    return json.dumps({
+                        "item": item.name,
+                        "remaining": round(remaining, 2),
+                        "unit": item.unit,
+                        "avg_daily_rate": round(avg_rate or 0, 3),
+                        "days_until_empty": days_until,
+                        "success": True,
+                    })
+                else:
+                    # Query all items
+                    overview = get_inventory_overview(db)
+                    items_info = [
+                        {
+                            "name": i.item_name,
+                            "remaining": round(i.remaining, 2),
+                            "unit": i.unit,
+                            "days_until_empty": i.days_until_empty,
+                        }
+                        for i in overview
+                    ]
+                    logger.info(f"📊 Queried {len(overview)} items")
+                    return json.dumps({"items": items_info, "success": True})
+
+            elif tool_name == "check_restock_alerts":
+                generate_restock_alerts(db)
+                needing = get_items_needing_restock(db)
+                alerts_info = [
                     {
                         "name": i.item_name,
                         "remaining": round(i.remaining, 2),
                         "unit": i.unit,
                         "days_until_empty": i.days_until_empty,
                     }
-                    for i in overview
+                    for i in needing
                 ]
-                return json.dumps({"items": items_info})
+                logger.info(f"⚠️ {len(needing)} items need restocking")
+                return json.dumps({"need_restock": alerts_info, "success": True})
 
-        elif tool_name == "check_restock_alerts":
-            generate_restock_alerts(db)
-            needing = get_items_needing_restock(db)
-            alerts_info = [
-                {
-                    "name": i.item_name,
-                    "remaining": round(i.remaining, 2),
-                    "unit": i.unit,
-                    "days_until_empty": i.days_until_empty,
-                }
-                for i in needing
-            ]
-            return json.dumps({"need_restock": alerts_info})
+            elif tool_name == "add_item":
+                item = self._find_or_create_item(
+                    db,
+                    tool_args["name"],
+                    tool_args["unit"],
+                    tool_args.get("category"),
+                    tool_args.get("target_audience", "all"),
+                )
+                logger.info(f"✅ Item added: {item.name} (unit={item.unit})")
+                return json.dumps({"id": item.id, "name": item.name, "unit": item.unit, "success": True})
 
-        elif tool_name == "add_item":
-            item = self._find_or_create_item(
-                db,
-                tool_args["name"],
-                tool_args["unit"],
-                tool_args.get("category"),
-                tool_args.get("target_audience", "all"),
-            )
-            return json.dumps({"id": item.id, "name": item.name, "unit": item.unit})
+            elif tool_name == "list_items":
+                items = db.query(Item).all()
+                items_info = [
+                    {"id": i.id, "name": i.name, "unit": i.unit, "target_audience": i.target_audience}
+                    for i in items
+                ]
+                logger.info(f"📋 Listed {len(items)} items")
+                return json.dumps({"items": items_info, "success": True})
 
-        elif tool_name == "list_items":
-            items = db.query(Item).all()
-            items_info = [
-                {"id": i.id, "name": i.name, "unit": i.unit, "target_audience": i.target_audience}
-                for i in items
-            ]
-            return json.dumps({"items": items_info})
+            elif tool_name in ("search_products", "compare_products"):
+                # Product search — delegates to ProductSearchService
+                item_name = tool_args["item_name"]
+                quantity = tool_args.get("quantity")
+                unit = tool_args.get("unit")
+                logger.info(f"🔍 Searching products for: {item_name}")
 
-        elif tool_name in ("search_products", "compare_products"):
-            # Product search — delegates to ProductSearchService
-            item_name = tool_args["item_name"]
-            quantity = tool_args.get("quantity")
-            unit = tool_args.get("unit")
+                service = ProductSearchService()
 
-            service = ProductSearchService()
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        future = pool.submit(asyncio.run, service.search(item_name, quantity, unit))
+                        product_links = future.result(timeout=60)
+                except RuntimeError:
+                    product_links = asyncio.run(service.search(item_name, quantity, unit))
+                except Exception as e:
+                    logger.error(f"❌ Product search failed: {e}")
+                    return json.dumps({
+                        "products": [],
+                        "success": False,
+                        "error": f"搜索失败: {str(e)}",
+                    })
 
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, service.search(item_name, quantity, unit))
-                    product_links = future.result(timeout=60)
-            except RuntimeError:
-                product_links = asyncio.run(service.search(item_name, quantity, unit))
+                # Convert ProductLink objects to dicts for JSON serialization
+                products_data = [
+                    {
+                        "platform": p.platform,
+                        "product_name": p.product_name,
+                        "price": p.price,
+                        "url": p.url,
+                        "display_url": p.display_url,
+                    }
+                    for p in product_links
+                ]
+                logger.info(f"✅ Found {len(product_links)} products")
+                return json.dumps({"products": products_data, "success": True})
 
-            # Convert ProductLink objects to dicts for JSON serialization
-            products_data = [
-                {
-                    "platform": p.platform,
-                    "product_name": p.product_name,
-                    "price": p.price,
-                    "url": p.url,
-                    "display_url": p.display_url,
-                }
-                for p in product_links
-            ]
-            return json.dumps({"products": products_data})
+            logger.error(f"❌ Unknown tool: {tool_name}")
+            return json.dumps({"error": f"Unknown tool: {tool_name}", "success": False})
 
-        return json.dumps({"error": f"Unknown tool: {tool_name}"})
+        except Exception as e:
+            logger.error(f"❌ Tool execution failed: {tool_name} - {e}", exc_info=True)
+            return json.dumps({
+                "error": str(e),
+                "success": False,
+                "tool": tool_name,
+            })
 
     def get_triggers(self) -> list[dict]:
         """Daily restock check trigger."""

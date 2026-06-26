@@ -1,28 +1,35 @@
-"""Skill framework — base class and registry for all agent skills."""
+"""Skills module.
 
-from typing import Optional
+This module provides skill implementations for the agent.
+"""
 
-from app.skills.base import BaseSkill
-from app.modules.inventory.skill import InventorySkill
-
-# Registry of all available skills
-SKILLS: dict[str, BaseSkill] = {}
+# Delayed import to avoid circular dependency
+_skills_registry = None
 
 
-def register_skill(skill: BaseSkill):
-    """Register a skill module in the global registry."""
-    SKILLS[skill.name] = skill
+def get_all_skills():
+    """Get all registered skills (delayed import)."""
+    global _skills_registry
+    if _skills_registry is None:
+        from app.modules.inventory.skill import InventorySkill
+        _skills_registry = {
+            "inventory": InventorySkill(),
+        }
+    return _skills_registry
 
 
-def get_skill(name: str) -> Optional[BaseSkill]:
-    """Retrieve a skill by name, or None if not found."""
-    return SKILLS.get(name)
+def get_skill(name: str):
+    """Get a specific skill by name (delayed import)."""
+    skills = get_all_skills()
+    # Support both "inventory" and legacy "shopping" name
+    if name == "shopping":
+        name = "inventory"
+    return skills.get(name)
 
 
-def get_all_skills() -> dict[str, BaseSkill]:
-    """Return all registered skills."""
-    return SKILLS
-
-
-# Auto-register known skills
-register_skill(InventorySkill())
+def register_skill(skill):
+    """Register a new skill."""
+    global _skills_registry
+    if _skills_registry is None:
+        _skills_registry = {}
+    _skills_registry[skill.name] = skill
