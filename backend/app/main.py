@@ -12,8 +12,8 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import init_db
-from app.config import FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_MODE, TRIGGER_ENABLED
+from app.shared.database import init_db
+from app.shared.config import FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_MODE, TRIGGER_ENABLED
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -34,8 +34,8 @@ async def lifespan(app: FastAPI):
     feishu_client = FeishuClient(FEISHU_APP_ID, FEISHU_APP_SECRET)
 
     # Initialize orchestrator and session manager
-    from app.services.orchestrator import Orchestrator
-    from app.services.session import SessionManager
+    from app.shared.orchestrator import Orchestrator
+    from app.shared.session import SessionManager
     orchestrator = Orchestrator()
     session_manager = SessionManager()
 
@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Unknown FEISHU_MODE: {FEISHU_MODE}, defaulting to webhook")
 
     # Start trigger engine (proactive notifications)
-    from app.services.trigger_engine import TriggerEngine
+    from app.modules.inventory.triggers import TriggerEngine
     trigger_engine = TriggerEngine(feishu_client)
     trigger_engine.register_all_triggers()
     trigger_engine.start()
@@ -99,13 +99,16 @@ from app.feishu.webhook import router as feishu_router
 app.include_router(feishu_router)
 
 # REST API routers (keep for admin/debug access)
-from app.routers import family, items, consumption, purchases, inventory, alerts
-app.include_router(family.router)
-app.include_router(items.router)
-app.include_router(consumption.router)
-app.include_router(purchases.router)
-app.include_router(inventory.router)
-app.include_router(alerts.router)
+from app.modules.inventory.routers import (
+    family_router, items_router, consumption_router,
+    purchases_router, inventory_router, alerts_router
+)
+app.include_router(family_router)
+app.include_router(items_router)
+app.include_router(consumption_router)
+app.include_router(purchases_router)
+app.include_router(inventory_router)
+app.include_router(alerts_router)
 
 # Chat router — simplified for debug/testing without Feishu
 from app.routers.chat import router as chat_router

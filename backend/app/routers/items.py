@@ -3,7 +3,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.shared.database import get_db
 from app.models.item import Item, ItemCategory
 from app.schemas.schemas import ItemCreate, ItemUpdate, ItemOut, ItemCategoryCreate, ItemCategoryOut
 

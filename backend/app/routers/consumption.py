@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.shared.database import get_db
 from app.models.consumption import ConsumptionRecord
 from app.schemas.schemas import ConsumptionCreate, ConsumptionOut
 

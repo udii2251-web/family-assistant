@@ -1,6 +1,6 @@
 from sqlalchemy import Integer, String, Float, Column, ForeignKey, Date
 
-from app.database import Base
+from app.shared.database import Base
 
 
 class ConsumptionRecord(Base):

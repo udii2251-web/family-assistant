@@ -7,7 +7,7 @@ This endpoint remains for admin/debug testing only.
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.shared.database import get_db
 from app.schemas.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/chat", tags=["chat"])

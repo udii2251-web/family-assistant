@@ -3,7 +3,7 @@
 from sqlalchemy import Integer, String, Float, Column, ForeignKey, DateTime, Text
 from datetime import datetime
 
-from app.database import Base
+from app.shared.database import Base
 
 
 class ProductComparison(Base):

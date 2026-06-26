@@ -5,9 +5,9 @@ import logging
 
 from openai import OpenAI
 
-from app.config import LLM_API_BASE, LLM_API_KEY, LLM_MODEL
+from app.shared.config import LLM_API_BASE, LLM_API_KEY, LLM_MODEL
 from app.skills import get_all_skills, get_skill
-from app.database import SessionLocal
+from app.shared.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 

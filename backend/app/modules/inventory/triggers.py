@@ -1,8 +1,10 @@
-"""Trigger engine — schedules and executes proactive skill triggers.
+"""Inventory module triggers.
 
-Uses APScheduler to run periodic checks (e.g., daily restock alerts).
-Each skill registers triggers via get_triggers(), and the engine
-schedules them using cron triggers.
+Migrated from app/services/trigger_engine.py.
+
+Handles:
+- Daily restock alert scheduling
+- Periodic trigger execution
 """
 
 import logging

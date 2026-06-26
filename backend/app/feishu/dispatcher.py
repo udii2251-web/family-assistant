@@ -14,7 +14,7 @@ from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 from lark_oapi.card.action_handler import CardActionHandlerBuilder
 from lark_oapi.card.model import Card
 
-from app.config import (
+from app.shared.config import (
     FEISHU_APP_ID,
     FEISHU_APP_SECRET,
     FEISHU_VERIFICATION_TOKEN,

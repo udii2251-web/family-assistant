@@ -3,7 +3,7 @@
 from typing import Optional
 
 from app.skills.base import BaseSkill
-from app.skills.shopping import ShoppingSkill
+from app.modules.inventory.skill import InventorySkill
 
 # Registry of all available skills
 SKILLS: dict[str, BaseSkill] = {}
@@ -25,4 +25,4 @@ def get_all_skills() -> dict[str, BaseSkill]:
 
 
 # Auto-register known skills
-register_skill(ShoppingSkill())
+register_skill(InventorySkill())

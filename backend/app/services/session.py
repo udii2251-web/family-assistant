@@ -7,7 +7,7 @@ and multi-instance support.
 from typing import Optional
 from dataclasses import dataclass, field
 
-from app.config import SESSION_MAX_HISTORY
+from app.shared.config import SESSION_MAX_HISTORY
 
 
 @dataclass

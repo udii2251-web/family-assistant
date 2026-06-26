@@ -2,7 +2,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-from app.config import DB_PATH, DATA_DIR
+from app.shared.config import DB_PATH, DATA_DIR
 
 os.makedirs(DATA_DIR, exist_ok=True)
 

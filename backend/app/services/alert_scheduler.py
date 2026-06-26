@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 
 from app.models.alert import RestockAlert
 from app.models.item import Item
-from app.services.inventory import get_items_needing_restock, get_avg_daily_rate
-from app.config import ALERT_THRESHOLD_DAYS
+from app.modules.inventory.services import get_items_needing_restock, get_avg_daily_rate
+from app.shared.config import ALERT_THRESHOLD_DAYS
 
 
 def generate_restock_alerts(db: Session):

@@ -13,7 +13,7 @@ from typing import Optional
 import httpx
 from openai import OpenAI
 
-from app.config import SEARCH_API_KEY, SEARCH_API_BASE, LLM_API_BASE, LLM_API_KEY, LLM_MODEL
+from app.shared.config import SEARCH_API_KEY, SEARCH_API_BASE, LLM_API_BASE, LLM_API_KEY, LLM_MODEL
 from app.services.deep_link import DeepLinkGenerator
 
 logger = logging.getLogger(__name__)

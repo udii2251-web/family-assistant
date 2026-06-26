@@ -4,14 +4,14 @@ from datetime import date
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
-from app.config import LLM_API_BASE, LLM_API_KEY, LLM_MODEL
+from app.shared.config import LLM_API_BASE, LLM_API_KEY, LLM_MODEL
 from app.models.item import Item, ItemCategory
 from app.models.family import FamilyMember
 from app.models.consumption import ConsumptionRecord
 from app.models.purchase import PurchaseRecord
 from app.models.alert import RestockAlert
-from app.services.inventory import get_inventory_overview, get_remaining_for_item, get_avg_daily_rate, get_items_needing_restock
-from app.services.alert_scheduler import generate_restock_alerts
+from app.modules.inventory.services import get_inventory_overview, get_remaining_for_item, get_avg_daily_rate, get_items_needing_restock
+from app.modules.inventory.services import generate_restock_alerts
 
 def _get_client():
     if not LLM_API_KEY:

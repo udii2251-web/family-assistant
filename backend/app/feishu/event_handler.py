@@ -115,8 +115,8 @@ class FeishuEventHandler:
             # Mark the restock alert as done
             alert_id_str = action_value.get("alert_id", "")
 
-            from app.database import SessionLocal
-            from app.models.alert import RestockAlert
+            from app.shared.database import SessionLocal
+            from app.modules.inventory.models import RestockAlert
 
             db = SessionLocal()
             try:

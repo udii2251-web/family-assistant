@@ -3,9 +3,9 @@ from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.shared.database import get_db
 from app.schemas.schemas import InventoryItemOut
-from app.services.inventory import get_inventory_overview
+from app.modules.inventory.services import get_inventory_overview
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 

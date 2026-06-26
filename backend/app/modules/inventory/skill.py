@@ -1,7 +1,11 @@
-"""Shopping skill — the MVP's primary skill for household inventory tracking and product comparison.
+"""Inventory module skill.
 
-Migrates all tool logic from the original app/services/agent.py and adds
-two new tools: search_products and compare_products.
+Migrated from app/skills/shopping.py.
+
+Handles:
+- Inventory tracking (purchase/consumption records)
+- Restock alerts
+- Product comparison
 """
 
 import json
@@ -10,27 +14,24 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.skills.base import BaseSkill
-from app.models.item import Item, ItemCategory
-from app.models.purchase import PurchaseRecord
-from app.models.consumption import ConsumptionRecord
-from app.models.alert import RestockAlert
+from app.modules.inventory.models import Item, ItemCategory, PurchaseRecord, ConsumptionRecord, RestockAlert, FamilyMember
 from app.modules.inventory.services import (
     get_remaining_for_item,
     get_avg_daily_rate,
     get_inventory_overview,
     get_items_needing_restock,
+    generate_restock_alerts,
 )
-from app.modules.inventory.services import generate_restock_alerts
 from app.services.product_search import ProductSearchService
 from app.feishu.card_builder import CardBuilder, ProductLink
 
 
-class ShoppingSkill(BaseSkill):
-    """Handles household shopping: inventory tracking, consumption records, restock alerts, and product comparison."""
+class InventorySkill(BaseSkill):
+    """Handles household inventory: tracking, alerts, and product comparison."""
 
     @property
     def name(self) -> str:
-        return "shopping"
+        return "inventory"
 
     @property
     def description(self) -> str:
@@ -86,130 +87,12 @@ class ShoppingSkill(BaseSkill):
         return item
 
     def get_tools(self) -> list[dict]:
-        """Return tool definitions: 6 existing + 2 new product search tools."""
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "record_purchase",
-                    "description": "记录购买了一个物品，增加库存",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "item_name": {"type": "string", "description": "物品名称"},
-                            "quantity": {"type": "number", "description": "购买数量"},
-                            "unit": {"type": "string", "description": "单位(kg/L/包/瓶/个等)"},
-                            "purchase_date": {"type": "string", "description": "购买日期, YYYY-MM-DD格式, 默认今天"},
-                        },
-                        "required": ["item_name", "quantity", "unit"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "record_consumption",
-                    "description": "记录消耗了一个物品，减少库存",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "item_name": {"type": "string", "description": "物品名称"},
-                            "quantity": {"type": "number", "description": "消耗数量"},
-                            "unit": {"type": "string", "description": "单位(kg/L/包/瓶/个等)"},
-                            "record_date": {"type": "string", "description": "记录日期, YYYY-MM-DD格式, 默认今天"},
-                            "note": {"type": "string", "description": "备注(可选)"},
-                        },
-                        "required": ["item_name", "quantity", "unit"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "query_inventory",
-                    "description": "查询所有物品的库存情况，包括剩余量和预计耗尽日期",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "item_name": {"type": "string", "description": "指定查询某个物品(可选), 留空查询所有"},
-                        },
-                        "required": [],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "check_restock_alerts",
-                    "description": "查看哪些物品需要补货",
-                    "parameters": {"type": "object", "properties": {}, "required": []},
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "add_item",
-                    "description": "添加一个新的物品类型到系统中",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string", "description": "物品名称"},
-                            "unit": {"type": "string", "description": "默认单位"},
-                            "category": {"type": "string", "description": "分类(食品/洗护/宠物用品/清洁/其他)"},
-                            "target_audience": {"type": "string", "description": "适用对象: all/child/dog"},
-                        },
-                        "required": ["name", "unit"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_items",
-                    "description": "列出系统中所有物品类型",
-                    "parameters": {"type": "object", "properties": {}, "required": []},
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "search_products",
-                    "description": "搜索商品并比较各平台价格，返回淘宝、京东、拼多多的比价信息",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "item_name": {"type": "string", "description": "物品名称"},
-                            "quantity": {"type": "number", "description": "建议购买数量(可选)"},
-                            "unit": {"type": "string", "description": "单位(可选)"},
-                        },
-                        "required": ["item_name"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "compare_products",
-                    "description": "对比商品在不同平台的价格，提供购买建议和链接",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "item_name": {"type": "string", "description": "物品名称"},
-                            "quantity": {"type": "number", "description": "购买数量(可选)"},
-                            "unit": {"type": "string", "description": "单位(可选)"},
-                        },
-                        "required": ["item_name"],
-                    },
-                },
-            },
-        ]
+        """Return inventory-related Agent Tools."""
+        from app.modules.inventory.tools import get_inventory_tools
+        return get_inventory_tools()
 
     def execute_tool(self, db: Session, tool_name: str, tool_args: dict) -> str:
-        """Execute a tool call and return the result as a JSON string.
-
-        Migrates all logic from the original agent.py _execute_tool() function
-        for the 6 existing tools, plus handles 2 new product search tools.
-        """
+        """Execute a tool call and return the result as a JSON string."""
         today = date.today().isoformat()
 
         if tool_name == "record_purchase":
@@ -332,7 +215,6 @@ class ShoppingSkill(BaseSkill):
 
         elif tool_name in ("search_products", "compare_products"):
             # Product search — delegates to ProductSearchService
-            # When no search API is configured, uses LLM directly (no async HTTP needed)
             item_name = tool_args["item_name"]
             quantity = tool_args.get("quantity")
             unit = tool_args.get("unit")
@@ -369,19 +251,7 @@ class ShoppingSkill(BaseSkill):
         return [{"type": "periodic", "interval": "daily", "handler": "check_restock_and_notify"}]
 
     async def check_restock_and_notify(self, db: Session, feishu_client) -> list[str]:
-        """Proactive trigger: check items needing restock, search products, send Feishu cards.
-
-        Steps:
-        1. Generate restock alerts for items nearing depletion
-        2. For each item, search products for comparison
-        3. Build restock alert card via CardBuilder
-        4. Find relevant family members to notify
-        5. Send card via feishu_client
-
-        Returns list of open_ids that were notified.
-        """
-        from app.models.family import FamilyMember
-
+        """Proactive trigger: check items needing restock, search products, send Feishu cards."""
         generate_restock_alerts(db)
         needing = get_items_needing_restock(db)
 
@@ -416,7 +286,6 @@ class ShoppingSkill(BaseSkill):
             )
 
             # Find who to notify — family members responsible for 采购
-            # Try to match by responsibilities field first
             members = db.query(FamilyMember).filter(
                 FamilyMember.type == "adult",
             ).all()
@@ -447,7 +316,7 @@ class ShoppingSkill(BaseSkill):
         return notified_open_ids
 
     def format_response(self, reply: str, actions: list[dict], context: dict) -> dict:
-        """Format shopping responses. If product search was done, return card; otherwise text."""
+        """Format inventory responses. If product search was done, return card; otherwise text."""
         # Check if any action was a product search
         has_product_search = any(
             a.get("tool") in ("search_products", "compare_products")
@@ -488,7 +357,6 @@ class ShoppingSkill(BaseSkill):
                     )
                     # If we have product links, use the restock-style card
                     if product_links:
-                        # Use a simplified comparison card (no alert_id needed for chat)
                         card = CardBuilder.restock_alert_card(
                             item_name=item_name,
                             remaining=0,
