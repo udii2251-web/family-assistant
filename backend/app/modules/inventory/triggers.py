@@ -40,29 +40,31 @@ class TriggerEngine:
             return
 
         for skill_name, skill in get_all_skills().items():
-            for trigger_def in skill.get_triggers():
-                if trigger_def["type"] == "periodic":
-                    handler_name = trigger_def["handler"]
-                    handler = getattr(skill, handler_name)
-                    interval = trigger_def.get("interval", "daily")
+            # Only register triggers if skill has get_triggers method
+            if hasattr(skill, 'get_triggers'):
+                for trigger_def in skill.get_triggers():
+                    if trigger_def["type"] == "periodic":
+                        handler_name = trigger_def["handler"]
+                        handler = getattr(skill, handler_name)
+                        interval = trigger_def.get("interval", "daily")
 
-                    # Map interval to cron triggers
-                    if interval == "daily":
-                        trigger = CronTrigger(hour=TRIGGER_SCHEDULE_HOUR, minute=0)
-                    elif interval == "hourly":
-                        trigger = CronTrigger(minute=0)
-                    else:
-                        trigger = CronTrigger(hour=TRIGGER_SCHEDULE_HOUR, minute=0)
+                        # Map interval to cron triggers
+                        if interval == "daily":
+                            trigger = CronTrigger(hour=TRIGGER_SCHEDULE_HOUR, minute=0)
+                        elif interval == "hourly":
+                            trigger = CronTrigger(minute=0)
+                        else:
+                            trigger = CronTrigger(hour=TRIGGER_SCHEDULE_HOUR, minute=0)
 
-                    job_id = f"{skill_name}_{handler_name}"
-                    self.scheduler.add_job(
-                        self._execute_trigger,
-                        trigger,
-                        args=[skill, handler],
-                        id=job_id,
-                        replace_existing=True,
-                    )
-                    logger.info(f"Registered trigger: {job_id} ({interval})")
+                        job_id = f"{skill_name}_{handler_name}"
+                        self.scheduler.add_job(
+                            self._execute_trigger,
+                            trigger,
+                            args=[skill, handler],
+                            id=job_id,
+                            replace_existing=True,
+                        )
+                        logger.info(f"Registered trigger: {job_id} ({interval})")
 
         self._registered = True
 
@@ -97,7 +99,8 @@ class TriggerEngine:
         from app.skills import get_all_skills
 
         for skill_name, skill in get_all_skills().items():
-            for trigger_def in skill.get_triggers():
-                handler_name = trigger_def["handler"]
-                handler = getattr(skill, handler_name)
-                await self._execute_trigger(skill, handler)
+            if hasattr(skill, 'get_triggers'):
+                for trigger_def in skill.get_triggers():
+                    handler_name = trigger_def["handler"]
+                    handler = getattr(skill, handler_name)
+                    await self._execute_trigger(skill, handler)
