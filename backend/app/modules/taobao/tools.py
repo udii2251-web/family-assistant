@@ -350,7 +350,7 @@ class TaobaoSkill:
         """Get tool definitions for this skill."""
         return get_taobao_tools()
 
-    async def execute_tool(self, db: Session, tool_name: str, tool_args: Dict[str, Any]) -> str:
+    def execute_tool(self, db: Session, tool_name: str, tool_args: Dict[str, Any]) -> str:
         """Execute a tool for this skill.
 
         Args:
@@ -361,7 +361,14 @@ class TaobaoSkill:
         Returns:
             str: Tool execution result
         """
-        return await execute_taobao_tool(db, tool_name, tool_args)
+        import asyncio
+        # Run async function synchronously
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(execute_taobao_tool(db, tool_name, tool_args))
+        finally:
+            loop.close()
 
     def format_response(self, reply: str, actions: List[Dict], context: Dict) -> Dict:
         """Format response for Feishu.
