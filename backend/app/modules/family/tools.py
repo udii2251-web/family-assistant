@@ -485,11 +485,32 @@ class FamilySkill:
         return execute_family_tool(db, tool_name, tool_args, user_open_id)
 
     def format_response(self, reply: str, actions: List[Dict], context: Dict) -> Dict:
-        """Format response for Feishu."""
-        return {
-            "type": "text",
-            "content": reply
-        }
+        """Format response for Feishu.
+
+        Returns UniversalCard for complex interactions, text for simple responses.
+        """
+        from app.services.universal_card import UniversalCardRenderer
+
+        # Check if response should be a card
+        if "创建家庭" in reply or "创建家庭" in str(actions):
+            from app.modules.family.cards import create_family_card
+            return {
+                "type": "card",
+                "content": UniversalCardRenderer.from_feishu_card(create_family_card())
+            }
+        elif "添加家庭成员" in reply:
+            from app.modules.family.cards import add_family_member_card
+            return {
+                "type": "card",
+                "content": UniversalCardRenderer.from_feishu_card(add_family_member_card())
+            }
+        elif "家庭信息" in reply or "家庭成员列表" in reply:
+            # Would need to fetch family data from db
+            return {"type": "text", "content": reply}
+        elif "邀请链接" in reply:
+            return {"type": "text", "content": reply}
+        else:
+            return {"type": "text", "content": reply}
 
 
 __all__ = [
