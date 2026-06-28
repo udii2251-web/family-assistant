@@ -18,6 +18,7 @@ class TaobaoOrder(Base):
     __tablename__ = "taobao_orders"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    family_id = Column(String(64), ForeignKey("families.family_id"), nullable=True, index=True, comment="关联家庭（数据隔离）")
     order_id = Column(String(64), unique=True, index=True, nullable=False, comment="淘宝订单号")
     product_name = Column(String(500), comment="商品名称（简短）")
     shop_name = Column(String(200), comment="店铺名称")

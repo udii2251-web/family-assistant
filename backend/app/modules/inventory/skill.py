@@ -74,9 +74,15 @@ class InventorySkill(BaseSkill):
         unit: str,
         category: str = None,
         target_audience: str = "all",
+        family_id: str = None,
     ) -> Item:
-        """Find existing item by name, or create a new one."""
-        item = db.query(Item).filter(Item.name == name).first()
+        """Find existing item by name (within family), or create a new one."""
+        # Query with family isolation
+        query_filter = [Item.name == name]
+        if family_id:
+            query_filter.append(Item.family_id == family_id)
+
+        item = db.query(Item).filter(*query_filter).first()
         if item:
             return item
 
@@ -90,7 +96,13 @@ class InventorySkill(BaseSkill):
                 db.refresh(cat)
             cat_id = cat.id
 
-        item = Item(name=name, unit=unit, category_id=cat_id, target_audience=target_audience)
+        item = Item(
+            name=name,
+            unit=unit,
+            category_id=cat_id,
+            target_audience=target_audience,
+            family_id=family_id,
+        )
         db.add(item)
         db.commit()
         db.refresh(item)
@@ -199,8 +211,30 @@ class InventorySkill(BaseSkill):
         - Detailed logging for each tool call
         - Unit conversion support
         - Better error handling
+        - Family isolation (filter by family_id)
         """
         logger.info(f"🔧 Executing tool: {tool_name} with args: {tool_args}")
+
+        # Get family_id from context (for data isolation)
+        family_id = None
+        if context:
+            from app.models.family import FamilyMember
+            user_open_id = context.get("open_id")
+            if user_open_id:
+                family_member = db.query(FamilyMember).filter(
+                    FamilyMember.feishu_open_id == user_open_id
+                ).first()
+                if family_member:
+                    family_id = family_member.family_id
+
+        # If no family_id, user must create/join a family first
+        if tool_name not in ["sync_orders_to_inventory"] and not family_id:
+            return json.dumps({
+                "success": False,
+                "error": "你还没有加入家庭，请先创建或加入家庭后再使用库存管理功能。",
+                "hint": "发送'创建家庭'或'加入家庭'开始使用。",
+            })
+
         today = date.today().isoformat()
 
         try:
@@ -210,13 +244,20 @@ class InventorySkill(BaseSkill):
                 unit = tool_args["unit"]
                 converted_qty, converted_unit = convert_unit(quantity, unit)
 
-                item = self._find_or_create_item(db, tool_args["item_name"], converted_unit)
+                item = self._find_or_create_item(db, tool_args["item_name"], converted_unit, family_id=family_id)
                 purchase_date_str = tool_args.get("purchase_date", today)
+
+                # Get buyer_open_id from context
+                buyer_open_id = context.get("open_id") if context else None
+
                 purchase = PurchaseRecord(
                     item_id=item.id,
+                    family_id=family_id,
                     quantity=converted_qty,
                     unit=converted_unit,
                     purchase_date=date.fromisoformat(purchase_date_str),
+                    buyer_open_id=buyer_open_id,
+                    source="chat_import",
                 )
                 db.add(purchase)
                 db.commit()
@@ -243,10 +284,15 @@ class InventorySkill(BaseSkill):
                 unit = tool_args["unit"]
                 converted_qty, converted_unit = convert_unit(quantity, unit)
 
-                item = self._find_or_create_item(db, tool_args["item_name"], converted_unit)
+                item = self._find_or_create_item(db, tool_args["item_name"], converted_unit, family_id=family_id)
                 record_date_str = tool_args.get("record_date", today)
+
+                # Get buyer_open_id from context
+                buyer_open_id = context.get("open_id") if context else None
+
                 consumption = ConsumptionRecord(
                     item_id=item.id,
+                    family_id=family_id,
                     quantity=converted_qty,
                     unit=converted_unit,
                     record_date=date.fromisoformat(record_date_str),
@@ -280,8 +326,11 @@ class InventorySkill(BaseSkill):
 
             elif tool_name == "query_inventory":
                 if tool_args.get("item_name"):
-                    # Query specific item
-                    item = db.query(Item).filter(Item.name.contains(tool_args["item_name"])).first()
+                    # Query specific item (with family isolation)
+                    item = db.query(Item).filter(
+                        Item.name.contains(tool_args["item_name"]),
+                        Item.family_id == family_id
+                    ).first()
                     if not item:
                         logger.warning(f"❌ Item not found: {tool_args['item_name']}")
                         return json.dumps({
@@ -304,8 +353,8 @@ class InventorySkill(BaseSkill):
                         "success": True,
                     })
                 else:
-                    # Query all items
-                    overview = get_inventory_overview(db)
+                    # Query all items (with family isolation)
+                    overview = get_inventory_overview(db, family_id=family_id)
                     items_info = [
                         {
                             "name": i.item_name,

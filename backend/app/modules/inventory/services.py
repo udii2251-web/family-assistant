@@ -114,37 +114,20 @@ def get_remaining_for_item(db: Session, item_id: int) -> float:
     return remaining
 
 
-def get_avg_daily_rate(db: Session, item_id: int, buyer_open_id: str = None) -> Optional[float]:
-    """Calculate average daily consumption rate for an item.
-
-    Args:
-        db: Database session
-        item_id: Item ID
-        buyer_open_id: Feishu open_id of buyer (for personal items)
-
-    Returns:
-        Average daily consumption rate (quantity per day), or None if no data
-
-    Note:
-        - For shared items (is_shared=1): calculate based on ALL purchase/consumption records
-        - For personal items (is_shared=0): calculate based on specific buyer's records (if provided)
-    """
+def get_avg_daily_rate(db: Session, item_id: int, buyer_open_id: str = None, family_id: str = None) -> Optional[float]:
+    """Calculate average daily consumption rate for an item (with family isolation)."""
     from app.modules.inventory.models import Item
 
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         return None
 
-    # Determine whether to filter by buyer (for personal items)
-    # TODO: Implement buyer-specific consumption tracking in ConsumptionRecord
-    # For now, all consumptions are treated as shared (no buyer tracking)
+    # Query consumptions with family isolation
+    query = db.query(ConsumptionRecord).filter(ConsumptionRecord.item_id == item_id)
+    if family_id:
+        query = query.filter(ConsumptionRecord.family_id == family_id)
 
-    records = (
-        db.query(ConsumptionRecord)
-        .filter(ConsumptionRecord.item_id == item_id)
-        .order_by(ConsumptionRecord.record_date)
-        .all()
-    )
+    records = query.order_by(ConsumptionRecord.record_date).all()
 
     if not records:
         return None
@@ -161,12 +144,14 @@ def get_avg_daily_rate(db: Session, item_id: int, buyer_open_id: str = None) -> 
     return total_consumed / days_span
 
 
-def get_inventory_overview(db: Session) -> list[InventoryItemOut]:
-    """Get inventory overview for all items with remaining amounts.
+def get_inventory_overview(db: Session, family_id: str = None) -> list[InventoryItemOut]:
+    """Get inventory overview for all items with remaining amounts (with family isolation)."""
+    # Query items with family isolation
+    query = db.query(Item)
+    if family_id:
+        query = query.filter(Item.family_id == family_id)
 
-    Performance optimization: Uses single query for all items.
-    """
-    items = db.query(Item).all()
+    items = query.all()
     result = []
 
     logger.info(f"📊 Calculating inventory overview for {len(items)} items")

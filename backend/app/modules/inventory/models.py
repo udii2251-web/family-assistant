@@ -43,6 +43,7 @@ class Item(Base):
     __tablename__ = "items"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    family_id = Column(String(64), ForeignKey("families.family_id"), nullable=True, index=True, comment="关联家庭（数据隔离）")
     name = Column(String(100), nullable=False)
     category_id = Column(Integer, ForeignKey("item_categories.id"), nullable=True)
     unit = Column(String(20), nullable=False)  # kg / L / 包 / 瓶 etc.
@@ -59,6 +60,7 @@ class PurchaseRecord(Base):
     __tablename__ = "purchase_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    family_id = Column(String(64), ForeignKey("families.family_id"), nullable=True, index=True, comment="关联家庭（数据隔离）")
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
     quantity = Column(Float, nullable=False)
     unit = Column(String(20), nullable=False)
@@ -75,6 +77,7 @@ class ConsumptionRecord(Base):
     __tablename__ = "consumption_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    family_id = Column(String(64), ForeignKey("families.family_id"), nullable=True, index=True, comment="关联家庭（数据隔离）")
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
     quantity = Column(Float, nullable=False)
     unit = Column(String(20), nullable=False)
@@ -88,6 +91,7 @@ class RestockAlert(Base):
     __tablename__ = "restock_alerts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    family_id = Column(String(64), ForeignKey("families.family_id"), nullable=True, index=True, comment="关联家庭（数据隔离）")
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
     alert_date = Column(Date, nullable=False)
     estimated_empty_date = Column(Date, nullable=True)
