@@ -13,9 +13,11 @@ def get_all_skills():
     if _skills_registry is None:
         from app.modules.inventory.skill import InventorySkill
         from app.modules.taobao.tools import TaobaoSkill
+        from app.modules.family.tools import FamilySkill
         _skills_registry = {
             "inventory": InventorySkill(),
             "taobao": TaobaoSkill(),
+            "family": FamilySkill(),  # 新增家庭管理skill
         }
     return _skills_registry
 
