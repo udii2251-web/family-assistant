@@ -13,6 +13,7 @@ Updated to use UniversalCardRenderer for platform-agnostic card format.
 import json
 import logging
 from datetime import date
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -55,14 +56,16 @@ class InventorySkill(BaseSkill):
 2. 查询库存情况
 3. 检查补货提醒
 4. 当用户提到需要购买某物品时，搜索并比较各平台价格
-5. 用自然、亲切的语言回复
+5. **同步淘宝订单到库存**（自动将淘宝订单商品匹配到库存系统）
+6. 用自然、亲切的语言回复
 
 重要规则：
 - 数量要精确提取，不要猜测
 - 单位要统一（用户说"斤"时，1斤=0.5kg）
 - 提到狗粮、狗零食等时，只关联2只狗的消耗
 - 提到儿童用品时，只关联1个小孩
-- 搜索商品时，提供淘宝、京东、拼多多三个平台的比价信息"""
+- 搜索商品时，提供淘宝、京东、拼多多三个平台的比价信息
+- 用户提到"同步订单"、"订单转库存"、"淘宝订单记入库存"时，调用sync_orders_to_inventory工具"""
 
     def _find_or_create_item(
         self,
@@ -92,6 +95,97 @@ class InventorySkill(BaseSkill):
         db.commit()
         db.refresh(item)
         return item
+
+    def _match_order_to_item(self, db: Session, product_name: str) -> Optional[Item]:
+        """Match Taobao order product name to existing Item.
+
+        Strategy:
+        1. Exact match
+        2. Contains match (Item name in product name)
+        3. Fuzzy match (keywords)
+
+        Returns:
+            Item or None if no match found
+        """
+        if not product_name:
+            return None
+
+        # Clean product name (remove shop prefixes, promo text)
+        # e.g., "俏伊朵假发旗舰店龙须丸子头假发..." -> "假发"
+        cleaned_name = self._clean_product_name(product_name)
+
+        # 1. Exact match
+        item = db.query(Item).filter(Item.name == cleaned_name).first()
+        if item:
+            logger.info(f"🎯 Exact match: '{product_name}' -> '{item.name}'")
+            return item
+
+        # 2. Contains match (Item name in cleaned product name)
+        all_items = db.query(Item).all()
+        for item in all_items:
+            if item.name in cleaned_name or cleaned_name in item.name:
+                logger.info(f"🎯 Contains match: '{product_name}' -> '{item.name}'")
+                return item
+
+        # 3. Keyword fuzzy match (e.g., "大米" matches "东北大米5kg")
+        # Use keywords from item names
+        keywords_map = {
+            "大米": ["大米", "米", "糙米", "精米", "东北米", "泰国米"],
+            "食用油": ["油", "食用油", "菜油", "花生油", "橄榄油", "玉米油"],
+            "牛奶": ["牛奶", "奶", "纯牛奶", "鲜奶", "奶粉"],
+            "洗衣液": ["洗衣液", "洗衣", "洗衣粉", "洗衣皂"],
+            "洗发水": ["洗发", "洗发水", "洗发露", "护发"],
+            "牙膏": ["牙膏", "牙", "口腔", "漱口水"],
+            "狗粮": ["狗粮", "犬粮", "宠物粮", "狗食"],
+            "狗零食": ["狗零食", "狗咬胶", "狗骨头", "宠物零食"],
+            "洗洁精": ["洗洁精", "洗碗", "洗碗液"],
+            "卫生纸": ["卫生纸", "纸巾", "手纸", "厕纸", "卷纸"],
+        }
+
+        for item in all_items:
+            keywords = keywords_map.get(item.name, [item.name])
+            for keyword in keywords:
+                if keyword in cleaned_name:
+                    logger.info(f"🎯 Keyword match: '{product_name}' -> '{item.name}' (keyword: '{keyword}')")
+                    return item
+
+        # No match found
+        logger.info(f"❌ No match for: '{product_name}' (cleaned: '{cleaned_name}')")
+        return None
+
+    def _clean_product_name(self, product_name: str) -> str:
+        """Clean Taobao product name by removing shop prefixes and promo text.
+
+        Examples:
+        - "俏伊朵假发旗舰店龙须丸子头假发..." -> "假发"
+        - "金龙鱼东北大米5kg..." -> "东北大米"
+        """
+        import re
+
+        # Remove common shop suffixes
+        name = re.sub(r'旗舰店|专营店|专卖店|官方店|官方', '', product_name)
+
+        # Remove promo text
+        name = re.sub(r'\[.*?\]|【.*?】|促销|优惠|包邮|赠品', '', name)
+
+        # Remove brand prefixes (keep product type)
+        # e.g., "金龙鱼东北大米" -> "东北大米"
+        common_brands = [
+            '金龙鱼', '福临门', '海天', '蓝月亮', '立白', '舒肤佳',
+            '高露洁', '佳洁士', '飘柔', '海飞丝', '沙宣',
+            '伊利', '蒙牛', '光明', '雀巢', '惠氏',
+            '宝路', '伟嘉', '皇家', '比瑞吉',
+        ]
+        for brand in common_brands:
+            name = name.replace(brand, '')
+
+        # Remove extra whitespace
+        name = re.sub(r'\s+', '', name)
+
+        # Remove special characters
+        name = re.sub(r'[^\w一-鿿]', '', name)
+
+        return name.strip()
 
     def get_tools(self) -> list[dict]:
         """Return inventory-related Agent Tools."""
@@ -298,6 +392,132 @@ class InventorySkill(BaseSkill):
                 ]
                 logger.info(f"✅ Found {len(product_infos)} products")
                 return json.dumps({"products": products_data, "success": True})
+
+            elif tool_name == "sync_orders_to_inventory":
+                """Sync Taobao orders to inventory (create PurchaseRecords)."""
+                from app.modules.taobao.models import TaobaoOrder, TaobaoOrderItem
+                from datetime import timedelta
+
+                days = tool_args.get("days", 30)
+                auto_confirm = tool_args.get("auto_confirm", False)
+
+                logger.info(f"🔧 Syncing Taobao orders to inventory (last {days} days)")
+
+                # Query unsynced orders
+                cutoff_date = date.today() - timedelta(days=days)
+                orders = db.query(TaobaoOrder).filter(
+                    TaobaoOrder.synced_to_inventory == False,
+                    TaobaoOrder.order_time >= cutoff_date
+                ).all()
+
+                if not orders:
+                    return json.dumps({
+                        "success": True,
+                        "message": "没有需要同步的订单",
+                        "synced_count": 0,
+                    })
+
+                synced_items = []
+                unmatched_items = []
+
+                for order in orders:
+                    # Get order items
+                    order_items = db.query(TaobaoOrderItem).filter(
+                        TaobaoOrderItem.order_id == order.order_id
+                    ).all()
+
+                    # If no items in taobao_order_items, use main order product_name
+                    if not order_items:
+                        # Try to match from main order
+                        matched_item = self._match_order_to_item(db, order.product_name)
+                        if matched_item:
+                            # Extract quantity from order (default to 1)
+                            quantity = 1
+                            unit = matched_item.unit
+
+                            # Create purchase record
+                            purchase = PurchaseRecord(
+                                item_id=matched_item.id,
+                                quantity=quantity,
+                                unit=unit,
+                                purchase_date=order.order_time.date() if order.order_time else date.today(),
+                            )
+                            db.add(purchase)
+
+                            # Mark order as synced
+                            order.synced_to_inventory = True
+
+                            synced_items.append({
+                                "order_id": order.order_id,
+                                "product_name": order.product_name,
+                                "matched_item": matched_item.name,
+                                "quantity": quantity,
+                                "unit": unit,
+                            })
+                            logger.info(f"✅ Synced order {order.order_id} to {matched_item.name}")
+                        else:
+                            unmatched_items.append({
+                                "order_id": order.order_id,
+                                "product_name": order.product_name,
+                                "shop_name": order.shop_name,
+                                "price": order.total_price,
+                            })
+                    else:
+                        # Process each order item
+                        for order_item in order_items:
+                            matched_item = self._match_order_to_item(db, order_item.product_name)
+                            if matched_item:
+                                quantity = order_item.quantity or 1
+                                unit = matched_item.unit
+
+                                # Create purchase record
+                                purchase = PurchaseRecord(
+                                    item_id=matched_item.id,
+                                    quantity=quantity,
+                                    unit=unit,
+                                    purchase_date=order.order_time.date() if order.order_time else date.today(),
+                                )
+                                db.add(purchase)
+
+                                synced_items.append({
+                                    "order_id": order.order_id,
+                                    "product_name": order_item.product_name,
+                                    "matched_item": matched_item.name,
+                                    "quantity": quantity,
+                                    "unit": unit,
+                                })
+                                logger.info(f"✅ Synced order item {order_item.product_name} to {matched_item.name}")
+                            else:
+                                unmatched_items.append({
+                                    "order_id": order.order_id,
+                                    "product_name": order_item.product_name,
+                                    "sku_name": order_item.sku_name,
+                                    "quantity": order_item.quantity,
+                                    "price": order_item.total_price,
+                                })
+
+                # Mark orders as synced if all items processed
+                for order in orders:
+                    if not any(u["order_id"] == order.order_id for u in unmatched_items):
+                        order.synced_to_inventory = True
+
+                db.commit()
+
+                result = {
+                    "success": True,
+                    "synced_count": len(synced_items),
+                    "unmatched_count": len(unmatched_items),
+                    "synced_items": synced_items,
+                    "unmatched_items": unmatched_items,
+                }
+
+                if unmatched_items and not auto_confirm:
+                    result["message"] = f"成功同步{len(synced_items)}个商品到库存，有{len(unmatched_items)}个商品未能自动匹配，请确认是否需要添加新物品类型。"
+                else:
+                    result["message"] = f"成功同步{len(synced_items)}个商品到库存"
+
+                logger.info(f"✅ Order sync complete: {len(synced_items)} synced, {len(unmatched_items)} unmatched")
+                return json.dumps(result)
 
             logger.error(f"❌ Unknown tool: {tool_name}")
             return json.dumps({"error": f"Unknown tool: {tool_name}", "success": False})

@@ -135,4 +135,25 @@ def get_inventory_tools():
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "sync_orders_to_inventory",
+                "description": "同步淘宝订单到库存记录，将已同步的淘宝订单商品自动匹配到系统物品并创建购买记录",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "number",
+                            "description": "同步最近N天的订单到库存，默认30天"
+                        },
+                        "auto_confirm": {
+                            "type": "boolean",
+                            "description": "是否自动确认匹配（默认false，未匹配物品生成确认卡片让用户确认)"
+                        }
+                    },
+                    "required": []
+                },
+            },
+        },
     ]
