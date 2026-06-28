@@ -1,10 +1,14 @@
-"""Handler for incoming Feishu events — message received and card action callbacks."""
+"""Handler for incoming Feishu events — message received and card action callbacks.
+
+Updated to handle UniversalCard responses from orchestrator.
+"""
 
 import json
 import logging
 
 from app.feishu.client import FeishuClient
-from app.feishu.card_builder import CardBuilder
+from app.feishu.card_adapter import convert_universal_to_feishu
+from app.services.universal_card import UniversalCard, UniversalCardRenderer, AlertLevel
 
 logger = logging.getLogger(__name__)
 
@@ -80,20 +84,54 @@ class FeishuEventHandler:
             return
 
         # Send response based on type
-        response_type = response.get("type", "text")
-        response_content = response.get("content", "")
+        # Response can be:
+        # - UniversalCard: Convert to Feishu JSON and send as card
+        # - str: Send as text message
+        # - dict (legacy format {"type": "text"|"card", "content": ...}): Handle for backward compat
+        if isinstance(response, UniversalCard):
+            # New format: UniversalCard
+            feishu_card = convert_universal_to_feishu(response)
+            msg_id = await self.client.reply_card(message_id, feishu_card)
+            response_content_str = str(feishu_card)
+        elif isinstance(response, str):
+            # Text response
+            msg_id = await self.client.reply_message(message_id, response)
+            response_content_str = response
+        elif isinstance(response, dict):
+            # Handle both legacy and new dict formats
+            response_type = response.get("type", "text")
+            response_content = response.get("content", "")
 
-        if response_type == "card":
-            # response_content is a dict (card JSON)
-            msg_id = await self.client.reply_card(message_id, response_content)
+            if response_type == "card":
+                # response_content can be:
+                # - UniversalCard: Convert to Feishu JSON
+                # - dict: Legacy Feishu JSON (backward compat)
+                if isinstance(response_content, UniversalCard):
+                    feishu_card = convert_universal_to_feishu(response_content)
+                    msg_id = await self.client.reply_card(message_id, feishu_card)
+                    response_content_str = str(feishu_card)
+                elif isinstance(response_content, dict):
+                    # Legacy format: already Feishu JSON
+                    msg_id = await self.client.reply_card(message_id, response_content)
+                    response_content_str = str(response_content)
+                else:
+                    logger.error(f"Unexpected card content type: {type(response_content)}")
+                    msg_id = await self.client.reply_message(message_id, "抱歉，卡片格式有问题。")
+                    response_content_str = "error"
+            else:
+                # response_content is a text string
+                msg_id = await self.client.reply_message(message_id, response_content)
+                response_content_str = response_content
         else:
-            # response_content is a text string
-            msg_id = await self.client.reply_message(message_id, response_content)
+            # Unknown type
+            logger.error(f"Unknown response type: {type(response)}")
+            msg_id = await self.client.reply_message(message_id, "抱歉，处理消息时出了点问题。")
+            response_content_str = "error"
 
         # Add assistant response to session history
-        self.session_manager.add_message(open_id, "assistant", str(response_content)[:200])
+        self.session_manager.add_message(open_id, "assistant", response_content_str[:200])
 
-        logger.info(f"Reply sent to {open_id}: {response_type}")
+        logger.info(f"Reply sent to {open_id}: type={type(response).__name__}")
 
     async def handle_card_action(self, event_data: dict) -> None:
         """Handle card.action.trigger events (button clicks).
@@ -132,27 +170,31 @@ class FeishuEventHandler:
                         alert.status = "done"
                         db.commit()
                         logger.info(f"Alert {alert_id} marked as done by {open_id}")
-                        new_card = CardBuilder.simple_text_card(
+                        # Use UniversalCardRenderer
+                        universal_card = UniversalCardRenderer.simple_text_card(
                             "✅ 已补货",
                             f"{alert.message or '补货提醒'}\n\n已由家人确认补货完成。",
-                            "green",
+                            AlertLevel.SUCCESS,
                         )
+                        new_card = convert_universal_to_feishu(universal_card)
                     else:
                         logger.warning(f"Alert {alert_id} not found")
-                        new_card = CardBuilder.simple_text_card(
+                        universal_card = UniversalCardRenderer.simple_text_card(
                             "✅ 已补货",
                             "已由家人确认补货完成。",
-                            "green",
+                            AlertLevel.SUCCESS,
                         )
+                        new_card = convert_universal_to_feishu(universal_card)
 
                 # Case 2: alert_id is "0" (from manual search in chat)
                 else:
                     logger.info(f"Manual purchase confirmation (alert_id=0) from {open_id}")
-                    new_card = CardBuilder.simple_text_card(
+                    universal_card = UniversalCardRenderer.simple_text_card(
                         "✅ 已补货",
                         "已由家人确认补货完成。",
-                        "green",
+                        AlertLevel.SUCCESS,
                     )
+                    new_card = convert_universal_to_feishu(universal_card)
 
                 # Update the card via PATCH API
                 if new_card and open_message_id:

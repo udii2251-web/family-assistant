@@ -1,4 +1,20 @@
-"""LLM-based intent router that dispatches user messages to skill modules."""
+"""LLM-based intent router that dispatches user messages to skill modules.
+
+Architecture:
+1. Receive user message
+2. Send message to LLM with routing prompt (lists all available skills)
+3. LLM returns which skill to invoke
+4. Load the selected skill's prompt + tools
+5. Send the user message again with skill-specific context
+6. Execute tool calls in a loop until LLM gives a final reply
+7. Format response via skill's format_response method
+8. Return formatted response (UniversalCard or text string)
+
+Response Format:
+- Skills return UniversalCard or str
+- Orchestrator passes through the skill's response
+- Feishu adapter layer converts UniversalCard to Feishu JSON
+"""
 
 import json
 import logging
@@ -23,7 +39,7 @@ class Orchestrator:
     5. Send the user message again with skill-specific context
     6. Execute tool calls in a loop until LLM gives a final reply
     7. Format response via skill's format_response method
-    8. Return formatted response for Feishu delivery
+    8. Return formatted response (UniversalCard or text string)
     """
 
     ROUTING_PROMPT = """你是一个家庭管理智能路由器。根据用户的消息，判断应该由哪个技能模块来处理。
@@ -55,7 +71,13 @@ class Orchestrator:
             session: UserSession from SessionManager
 
         Returns:
-            {"type": "text" | "card", "content": str | dict}
+            UniversalCard (from app.services.universal_card) or str
+            - UniversalCard: Platform-agnostic card structure
+            - str: Plain text response
+
+        Note:
+            Response is passed to FeishuEventHandler which converts
+            UniversalCard to Feishu JSON via card_adapter.
         """
         # Step 1: Route intent
         skill_name = self._route_intent(user_message)

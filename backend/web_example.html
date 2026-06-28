@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>家庭管家 - Web前端示例</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .chat-area {
+            height: 500px;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-content {
+            background: #667eea;
+            color: white;
+        }
+
+        .message.assistant .message-content {
+            background: white;
+            color: #333;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Card styles */
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .card-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-header h3 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .card-header .timestamp {
+            font-size: 12px;
+            color: #999;
+            margin-left: auto;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .card.info {
+            border-left: 4px solid #1890ff;
+        }
+
+        .card.warning {
+            border-left: 4px solid #fa8c16;
+        }
+
+        .card.error {
+            border-left: 4px solid #f5222d;
+        }
+
+        .card.success {
+            border-left: 4px solid #52c41a;
+        }
+
+        /* Product card */
+        .product-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .product-item.best {
+            background: #e6f7ff;
+            border: 1px solid #1890ff;
+        }
+
+        .product-info {
+            flex: 1;
+        }
+
+        .product-platform {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .product-name {
+            font-size: 13px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .product-price {
+            font-size: 18px;
+            font-weight: 600;
+            color: #f5222d;
+        }
+
+        /* Action buttons */
+        .card-actions {
+            padding: 15px 20px;
+            border-top: 1px solid #f0f0f0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #1890ff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #40a9ff;
+        }
+
+        .btn-default {
+            background: white;
+            color: #333;
+            border: 1px solid #d9d9d9;
+        }
+
+        .btn-default:hover {
+            border-color: #1890ff;
+            color: #1890ff;
+        }
+
+        .btn-success {
+            background: #52c41a;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #73d13d;
+        }
+
+        /* Inventory summary */
+        .inventory-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: #fafafa;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .inventory-item.urgent {
+            background: #fff1f0;
+            border-left: 3px solid #f5222d;
+        }
+
+        .inventory-item.warning {
+            background: #fff7e6;
+            border-left: 3px solid #fa8c16;
+        }
+
+        .inventory-item.normal {
+            background: #f6ffed;
+            border-left: 3px solid #52c41a;
+        }
+
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e8e8e8;
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-area input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e8e8e8;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .input-area input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .input-area button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+
+        .input-area button:hover {
+            background: #764ba2;
+        }
+
+        .input-area button:disabled {
+            background: #d9d9d9;
+            cursor: not-allowed;
+        }
+
+        /* Loading indicator */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Mode selector */
+        .mode-selector {
+            padding: 15px 20px;
+            background: white;
+            border-bottom: 1px solid #e8e8e8;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .mode-selector label {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .mode-selector select {
+            padding: 8px 12px;
+            border: 1px solid #d9d9d9;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏠 家庭管家</h1>
+            <p>智能家庭事务管理助手</p>
+        </div>
+
+        <div class="mode-selector">
+            <label>连接模式：</label>
+            <select id="modeSelect">
+                <option value="rest">REST API</option>
+                <option value="websocket">WebSocket</option>
+            </select>
+            <span id="connectionStatus" style="margin-left: auto; font-size: 13px; color: #52c41a;">已连接</span>
+        </div>
+
+        <div class="chat-area" id="chatArea">
+            <div class="message assistant">
+                <div class="message-content">
+                    你好！我是家庭管家，可以帮助你管理家庭库存、购物比价等事务。试试问我："帮我查一下洗衣液的库存"
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="messageInput" placeholder="输入消息..." />
+            <button id="sendButton" onclick="sendMessage()">发送</button>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE = 'http://localhost:8000';
+        let ws = null;
+        let currentMode = 'rest';
+        let userId = 'web_user_' + Math.random().toString(36).substr(2, 9);
+
+        // DOM elements
+        const chatArea = document.getElementById('chatArea');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const modeSelect = document.getElementById('modeSelect');
+        const connectionStatus = document.getElementById('connectionStatus');
+
+        // Event listeners
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        modeSelect.addEventListener('change', (e) => {
+            currentMode = e.target.value;
+            if (currentMode === 'websocket') {
+                connectWebSocket();
+            } else {
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+                connectionStatus.textContent = '已连接';
+                connectionStatus.style.color = '#52c41a';
+            }
+        });
+
+        // WebSocket connection
+        function connectWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+
+            connectionStatus.textContent = '连接中...';
+            connectionStatus.style.color = '#fa8c16';
+
+            ws = new WebSocket(`${API_BASE.replace('http', 'ws')}/chat/ws/${userId}`);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                connectionStatus.textContent = '已连接';
+                connectionStatus.style.color = '#52c41a';
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                hideLoading();
+                displayResponse(data);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                connectionStatus.textContent = '连接错误';
+                connectionStatus.style.color = '#f5222d';
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                connectionStatus.textContent = '已断开';
+                connectionStatus.style.color = '#f5222d';
+            };
+        }
+
+        // Send message
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            // Display user message
+            addMessage(message, 'user');
+            messageInput.value = '';
+
+            // Show loading
+            showLoading();
+
+            try {
+                if (currentMode === 'rest') {
+                    await sendRestMessage(message);
+                } else {
+                    sendWebSocketMessage(message);
+                }
+            } catch (error) {
+                hideLoading();
+                addMessage(`错误: ${error.message}`, 'assistant');
+            }
+        }
+
+        // REST API
+        async function sendRestMessage(message) {
+            const response = await fetch(`${API_BASE}/chat/web`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            hideLoading();
+            displayResponse(data.data);
+        }
+
+        // WebSocket
+        function sendWebSocketMessage(message) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addMessage('WebSocket未连接，请切换到REST API模式或等待连接', 'assistant');
+                hideLoading();
+                return;
+            }
+
+            ws.send(JSON.stringify({
+                type: 'message',
+                content: message,
+            }));
+        }
+
+        // Display response
+        function displayResponse(data) {
+            if (data.type === 'text' || data.type === 'simple_text') {
+                addMessage(data.content.text, 'assistant');
+            } else if (data.type === 'card') {
+                addCard(data);
+            } else {
+                addMessage(JSON.stringify(data, null, 2), 'assistant');
+            }
+        }
+
+        // Add text message
+        function addMessage(text, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.innerHTML = `
+                <div class="message-content">${escapeHtml(text)}</div>
+            `;
+            chatArea.appendChild(messageDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        // Add card message
+        function addCard(card) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+
+            let cardHtml = `<div class="card ${card.level}">`;
+            cardHtml += `
+                <div class="card-header">
+                    <h3>${escapeHtml(card.title)}</h3>
+                    <span class="timestamp">${card.timestamp}</span>
+                </div>
+            `;
+
+            // Card body based on type
+            if (card.type === 'restock_alert') {
+                cardHtml += renderRestockAlert(card);
+            } else if (card.type === 'inventory_summary') {
+                cardHtml += renderInventorySummary(card);
+            } else if (card.type === 'product_comparison') {
+                cardHtml += renderProductComparison(card);
+            } else {
+                cardHtml += `<div class="card-body">${escapeHtml(JSON.stringify(card.content, null, 2))}</div>`;
+            }
+
+            // Actions
+            if (card.actions && card.actions.length > 0) {
+                cardHtml += '<div class="card-actions">';
+                card.actions.forEach(action => {
+                    if (action.type === 'link') {
+                        cardHtml += `
+                            <a href="${action.url}" target="_blank" class="btn btn-${action.style === 'primary' ? 'primary' : 'default'}">
+                                ${escapeHtml(action.text)}
+                            </a>
+                        `;
+                    } else if (action.type === 'callback') {
+                        cardHtml += `
+                            <button class="btn btn-success" onclick="handleAction('${action.data.action}', '${action.data.alert_id}')">
+                                ${escapeHtml(action.text)}
+                            </button>
+                        `;
+                    }
+                });
+                cardHtml += '</div>';
+            }
+
+            cardHtml += '</div>';
+            messageDiv.innerHTML = cardHtml;
+            chatArea.appendChild(messageDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        // Render restock alert
+        function renderRestockAlert(card) {
+            const summary = card.content.summary;
+            const products = card.content.products;
+
+            let html = '<div class="card-body">';
+            html += `
+                <div style="margin-bottom: 15px;">
+                    <p><strong>当前库存：</strong>${summary.remaining}${summary.unit}</p>
+                    <p><strong>预计耗尽：</strong>${summary.daysUntilEmpty}天后</p>
+                    <p><strong>建议购买：</strong>${summary.suggestedQuantity}${summary.unit}</p>
+                </div>
+            `;
+
+            if (products && products.length > 0) {
+                html += '<h4 style="margin: 15px 0 10px;">💰 价格对比</h4>';
+                products.forEach(product => {
+                    html += `
+                        <div class="product-item ${product.isBestPrice ? 'best' : ''}">
+                            <div class="product-info">
+                                <div class="product-platform">${escapeHtml(product.platformName)} ${product.isBestPrice ? '🏆' : ''}</div>
+                                <div class="product-name">${escapeHtml(product.productName)}</div>
+                            </div>
+                            <div class="product-price">${product.priceText}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        // Render inventory summary
+        function renderInventorySummary(card) {
+            const items = card.content.items;
+
+            let html = '<div class="card-body">';
+            items.forEach(item => {
+                html += `
+                    <div class="inventory-item ${item.status}">
+                        <div>${escapeHtml(item.displayText)}</div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+
+            return html;
+        }
+
+        // Render product comparison
+        function renderProductComparison(card) {
+            const products = card.content.products;
+            const replyText = card.content.replyText;
+
+            let html = '<div class="card-body">';
+
+            if (replyText) {
+                html += `<p style="margin-bottom: 15px;">${escapeHtml(replyText)}</p>`;
+            }
+
+            if (products && products.length > 0) {
+                html += '<h4 style="margin: 15px 0 10px;">💰 价格对比</h4>';
+                products.forEach(product => {
+                    html += `
+                        <div class="product-item ${product.isBestPrice ? 'best' : ''}">
+                            <div class="product-info">
+                                <div class="product-platform">${escapeHtml(product.platformName)} ${product.isBestPrice ? '🏆' : ''}</div>
+                                <div class="product-name">${escapeHtml(product.productName)}</div>
+                            </div>
+                            <div class="product-price">${product.priceText}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        // Handle card action
+        async function handleAction(action, alertId) {
+            try {
+                const response = await fetch(`${API_BASE}/chat/web/action`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: action,
+                        alert_id: alertId,
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                addMessage('已确认补货完成！', 'assistant');
+            } catch (error) {
+                addMessage(`操作失败: ${error.message}`, 'assistant');
+            }
+        }
+
+        // Show loading indicator
+        function showLoading() {
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'loading';
+            loadingDiv.className = 'message assistant';
+            loadingDiv.innerHTML = '<div class="message-content"><div class="loading"></div></div>';
+            chatArea.appendChild(loadingDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            sendButton.disabled = true;
+        }
+
+        // Hide loading indicator
+        function hideLoading() {
+            const loadingDiv = document.getElementById('loading');
+            if (loadingDiv) {
+                loadingDiv.remove();
+            }
+            sendButton.disabled = false;
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize WebSocket if mode is websocket
+        if (currentMode === 'websocket') {
+            connectWebSocket();
+        }
+    </script>
+</body>
+</html>

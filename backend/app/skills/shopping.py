@@ -2,6 +2,8 @@
 
 Migrates all tool logic from the original app/services/agent.py and adds
 two new tools: search_products and compare_products.
+
+Updated to use UniversalCardRenderer for platform-agnostic card format.
 """
 
 import json
@@ -22,7 +24,8 @@ from app.modules.inventory.services import (
 )
 from app.modules.inventory.services import generate_restock_alerts
 from app.services.product_search import ProductSearchService
-from app.feishu.card_builder import CardBuilder, ProductLink
+from app.services.universal_card import UniversalCardRenderer, ProductInfo, AlertLevel
+from app.feishu.card_adapter import convert_universal_to_feishu
 
 
 class ShoppingSkill(BaseSkill):
@@ -345,20 +348,20 @@ class ShoppingSkill(BaseSkill):
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(asyncio.run, service.search(item_name, quantity, unit))
-                    product_links = future.result(timeout=60)
+                    product_infos = future.result(timeout=60)
             except RuntimeError:
-                product_links = asyncio.run(service.search(item_name, quantity, unit))
+                product_infos = asyncio.run(service.search(item_name, quantity, unit))
 
-            # Convert ProductLink objects to dicts for JSON serialization
+            # Convert ProductInfo objects to dicts for JSON serialization
             products_data = [
                 {
                     "platform": p.platform,
                     "product_name": p.product_name,
                     "price": p.price,
-                    "url": p.url,
-                    "display_url": p.display_url,
+                    "url": p.deep_link,
+                    "display_url": p.web_url,
                 }
-                for p in product_links
+                for p in product_infos
             ]
             return json.dumps({"products": products_data})
 
@@ -374,13 +377,15 @@ class ShoppingSkill(BaseSkill):
         Steps:
         1. Generate restock alerts for items nearing depletion
         2. For each item, search products for comparison
-        3. Build restock alert card via CardBuilder
-        4. Find relevant family members to notify
-        5. Send card via feishu_client
+        3. Build restock alert card via UniversalCardRenderer
+        4. Convert to Feishu format via card_adapter
+        5. Find relevant family members to notify
+        6. Send card via feishu_client
 
         Returns list of open_ids that were notified.
         """
         from app.models.family import FamilyMember
+        from app.feishu.card_adapter import convert_universal_to_feishu
 
         generate_restock_alerts(db)
         needing = get_items_needing_restock(db)
@@ -400,20 +405,31 @@ class ShoppingSkill(BaseSkill):
 
             # Search products for comparison
             suggested_qty = round(inv_item.avg_daily_rate * 14, 1) if inv_item.avg_daily_rate else 1
-            product_links = await search_service.search(
+            product_infos = await search_service.search(
                 inv_item.item_name, suggested_qty, inv_item.unit
             )
 
-            # Build card
-            card = CardBuilder.restock_alert_card(
+            # Find cheapest price for marking
+            prices = [p.price for p in product_infos if p.price > 0]
+            cheapest_price = min(prices) if prices else 0
+
+            # Update is_best_price flag
+            for p in product_infos:
+                p.is_best_price = (p.price == cheapest_price and p.price > 0)
+
+            # Build universal card
+            universal_card = UniversalCardRenderer.restock_alert_card(
                 item_name=inv_item.item_name,
                 remaining=inv_item.remaining,
                 unit=inv_item.unit,
                 days_until_empty=inv_item.days_until_empty or 0,
                 suggested_quantity=suggested_qty,
-                products=product_links,
+                products=product_infos,
                 alert_id=alert_id,
             )
+
+            # Convert to Feishu format
+            feishu_card = convert_universal_to_feishu(universal_card)
 
             # Find who to notify — family members responsible for 采购
             # Try to match by responsibilities field first
@@ -436,7 +452,7 @@ class ShoppingSkill(BaseSkill):
 
             for member in target_members:
                 if member.feishu_open_id:
-                    await feishu_client.send_card_message(member.feishu_open_id, card)
+                    await feishu_client.send_card_message(member.feishu_open_id, feishu_card)
                     notified_open_ids.append(member.feishu_open_id)
 
             # Update alert status to "notified"
@@ -447,7 +463,11 @@ class ShoppingSkill(BaseSkill):
         return notified_open_ids
 
     def format_response(self, reply: str, actions: list[dict], context: dict) -> dict:
-        """Format shopping responses. If product search was done, return card; otherwise text."""
+        """Format shopping responses. If product search was done, return UniversalCard; otherwise text.
+
+        Returns:
+            {"type": "text" | "card", "content": str | UniversalCard}
+        """
         # Check if any action was a product search
         has_product_search = any(
             a.get("tool") in ("search_products", "compare_products")
@@ -464,13 +484,19 @@ class ShoppingSkill(BaseSkill):
                     except json.JSONDecodeError:
                         products_raw = []
 
-                    product_links = [
-                        ProductLink(
+                    # Convert to ProductInfo
+                    # Find cheapest price
+                    prices = [p.get("price", 0) for p in products_raw if p.get("price", 0) > 0]
+                    cheapest_price = min(prices) if prices else 0
+
+                    product_infos = [
+                        ProductInfo(
                             platform=p.get("platform", ""),
                             product_name=p.get("product_name", ""),
                             price=p.get("price", 0),
-                            url=p.get("url", ""),
-                            display_url=p.get("display_url", ""),
+                            deep_link=p.get("url", ""),
+                            web_url=p.get("display_url", ""),
+                            is_best_price=(p.get("price", 0) == cheapest_price and p.get("price", 0) > 0),
                         )
                         for p in products_raw
                     ]
@@ -481,23 +507,12 @@ class ShoppingSkill(BaseSkill):
                         if a2.get("tool") in ("search_products", "compare_products"):
                             item_name = a2.get("args", {}).get("item_name", "")
 
-                    card = CardBuilder.simple_text_card(
-                        f"🔍 {item_name} — 价格对比",
-                        reply,
-                        "blue",
+                    # Use product_comparison_card for manual search
+                    universal_card = UniversalCardRenderer.product_comparison_card(
+                        item_name=item_name,
+                        products=product_infos,
+                        reply_text=reply,
                     )
-                    # If we have product links, use the restock-style card
-                    if product_links:
-                        # Use a simplified comparison card (no alert_id needed for chat)
-                        card = CardBuilder.restock_alert_card(
-                            item_name=item_name,
-                            remaining=0,
-                            unit="",
-                            days_until_empty=0,
-                            suggested_quantity=0,
-                            products=product_links,
-                            alert_id=0,
-                        )
-                    return {"type": "card", "content": card}
+                    return {"type": "card", "content": universal_card}
 
         return {"type": "text", "content": reply}

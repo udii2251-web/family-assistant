@@ -1,24 +1,23 @@
 """Product search service — search and compare products across Chinese e-commerce platforms.
 
 Strategy (MVP):
-  When SEARCH_API_KEY is configured: Bing Search API → LLM parse → ProductLink
+  When SEARCH_API_KEY is configured: Bing Search API → LLM parse → ProductInfo
   When SEARCH_API_KEY is not configured: LLM directly generates product comparison
   based on market knowledge, with deep links to each platform's search page.
 """
 
 import json
 import logging
-from typing import Optional
+from typing import Optional, List
 
 import httpx
 from openai import OpenAI
 
 from app.shared.config import SEARCH_API_KEY, SEARCH_API_BASE, LLM_API_BASE, LLM_API_KEY, LLM_MODEL
 from app.services.deep_link import DeepLinkGenerator
+from app.services.universal_card import ProductInfo
 
 logger = logging.getLogger(__name__)
-
-from app.feishu.card_builder import ProductLink
 
 
 class ProductSearchService:
@@ -95,11 +94,14 @@ platform 必须是 taobao/jd/pdd 三个值之一。"""
         item_name: str,
         quantity: Optional[float] = None,
         unit: Optional[str] = None,
-    ) -> list[ProductLink]:
+    ) -> List[ProductInfo]:
         """Search for a product across all three platforms.
 
         If SEARCH_API_KEY is configured, uses Bing Search API + LLM parsing.
         Otherwise, uses LLM directly to generate comparison data.
+
+        Returns:
+            List of ProductInfo objects with deep links for each platform.
         """
         qty_desc = ""
         if quantity and unit:
@@ -117,17 +119,20 @@ platform 必须是 taobao/jd/pdd 三个值之一。"""
         item_name: str,
         quantity: Optional[float] = None,
         unit: Optional[str] = None,
-    ) -> list[ProductLink]:
+    ) -> List[ProductInfo]:
         """Alias for search()."""
         return await self.search(item_name, quantity, unit)
 
     async def _search_via_llm(
         self, item_name: str, qty_desc: str
-    ) -> list[ProductLink]:
+    ) -> List[ProductInfo]:
         """Generate product comparison using LLM's market knowledge.
 
         No external search API needed. The LLM estimates typical prices
         for each platform based on its knowledge of Chinese e-commerce.
+
+        Returns:
+            List of ProductInfo objects.
         """
         item_desc = f"{item_name}{qty_desc}"
         prompt = self.LLM_COMPARE_PROMPT.format(item_desc=item_desc)
@@ -155,7 +160,7 @@ platform 必须是 taobao/jd/pdd 三个值之一。"""
             products_raw = data.get("products", [])
             logger.info(f"LLM generated {len(products_raw)} product comparisons for {item_name}")
 
-            return self._raw_to_product_links(products_raw, item_name, qty_desc)
+            return self._raw_to_product_infos(products_raw, item_name, qty_desc)
 
         except json.JSONDecodeError as e:
             logger.error(f"LLM JSON parsing failed: {e}, raw content: {content[:200]}")
@@ -166,8 +171,12 @@ platform 必须是 taobao/jd/pdd 三个值之一。"""
 
     async def _search_via_api(
         self, item_name: str, qty_desc: str
-    ) -> list[ProductLink]:
-        """Full search mode: Bing Search API → LLM parsing."""
+    ) -> List[ProductInfo]:
+        """Full search mode: Bing Search API → LLM parsing.
+
+        Returns:
+            List of ProductInfo objects.
+        """
         all_results = ""
         for platform, config in self.PLATFORM_CONFIG.items():
             query = config["search_query_template"].format(item_name=item_name) + qty_desc
@@ -182,14 +191,27 @@ platform 必须是 taobao/jd/pdd 三个值之一。"""
             return self._fallback_products(item_name, qty_desc)
 
         products_raw = await self._parse_search_results(all_results, item_name)
-        return self._raw_to_product_links(products_raw, item_name, qty_desc)
+        return self._raw_to_product_infos(products_raw, item_name, qty_desc)
 
-    def _raw_to_product_links(
+    def _raw_to_product_infos(
         self, products_raw: list[dict], item_name: str, qty_desc: str
-    ) -> list[ProductLink]:
-        """Convert raw product dicts to ProductLink objects with deep links."""
+    ) -> List[ProductInfo]:
+        """Convert raw product dicts to ProductInfo objects with deep links.
+
+        Args:
+            products_raw: List of raw product dicts from LLM or search API
+            item_name: Product name
+            qty_desc: Quantity description string
+
+        Returns:
+            List of ProductInfo objects with deep links and web URLs.
+        """
         keyword = f"{item_name}{qty_desc}"
-        product_links = []
+        product_infos = []
+
+        # Find best price for marking
+        prices = [p.get("price", 0) for p in products_raw if p.get("price", 0) > 0]
+        best_price = min(prices) if prices else 0
 
         for p in products_raw:
             platform = p.get("platform", "")
@@ -203,15 +225,18 @@ platform 必须是 taobao/jd/pdd 三个值之一。"""
             if url and url.startswith("http"):
                 web_url = url
 
-            product_links.append(ProductLink(
+            is_best = (price == best_price and price > 0)
+
+            product_infos.append(ProductInfo(
                 platform=platform,
                 product_name=name,
                 price=price,
-                url=deep_link,
-                display_url=web_url,
+                deep_link=deep_link,
+                web_url=web_url,
+                is_best_price=is_best,
             ))
 
-        return product_links
+        return product_infos
 
     async def _parse_search_results(self, search_results: str, item_name: str) -> list[dict]:
         """Use LLM to parse Bing search results into structured product data."""
@@ -263,24 +288,41 @@ platform 必须是 taobao/jd/pdd 三个值之一。"""
             result_lines.append("")
         return "\n".join(result_lines)
 
-    def _fallback_products(self, item_name: str, qty_desc: str) -> list[ProductLink]:
-        """Generate fallback ProductLink objects with deep links only (no price data)."""
+    def _fallback_products(self, item_name: str, qty_desc: str) -> List[ProductInfo]:
+        """Generate fallback ProductInfo objects with deep links only (no price data).
+
+        Args:
+            item_name: Product name
+            qty_desc: Quantity description string
+
+        Returns:
+            List of ProductInfo objects for each platform with deep links.
+        """
         keyword = f"{item_name}{qty_desc}"
         return [
-            ProductLink(
-                platform="taobao", product_name=f"{item_name}（淘宝搜索）", price=0,
-                url=self.deep_link_gen.generate_search_link("taobao", keyword),
-                display_url=self.deep_link_gen.generate_web_fallback("taobao", keyword),
+            ProductInfo(
+                platform="taobao",
+                product_name=f"{item_name}（淘宝搜索）",
+                price=0,
+                deep_link=self.deep_link_gen.generate_search_link("taobao", keyword),
+                web_url=self.deep_link_gen.generate_web_fallback("taobao", keyword),
+                is_best_price=False,
             ),
-            ProductLink(
-                platform="jd", product_name=f"{item_name}（京东搜索）", price=0,
-                url=self.deep_link_gen.generate_search_link("jd", keyword),
-                display_url=self.deep_link_gen.generate_web_fallback("jd", keyword),
+            ProductInfo(
+                platform="jd",
+                product_name=f"{item_name}（京东搜索）",
+                price=0,
+                deep_link=self.deep_link_gen.generate_search_link("jd", keyword),
+                web_url=self.deep_link_gen.generate_web_fallback("jd", keyword),
+                is_best_price=False,
             ),
-            ProductLink(
-                platform="pdd", product_name=f"{item_name}（拼多多搜索）", price=0,
-                url=self.deep_link_gen.generate_search_link("pdd", keyword),
-                display_url=self.deep_link_gen.generate_web_fallback("pdd", keyword),
+            ProductInfo(
+                platform="pdd",
+                product_name=f"{item_name}（拼多多搜索）",
+                price=0,
+                deep_link=self.deep_link_gen.generate_search_link("pdd", keyword),
+                web_url=self.deep_link_gen.generate_web_fallback("pdd", keyword),
+                is_best_price=False,
             ),
         ]
 
