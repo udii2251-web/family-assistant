@@ -101,7 +101,7 @@ class Orchestrator:
             messages = self._build_skill_messages(skill, session, user_message)
 
             # Step 5: Run tool-calling loop
-            reply, actions = self._run_skill_loop(skill, db, messages)
+            reply, actions = self._run_skill_loop(skill, db, messages, open_id)
 
             # Step 6: Format response via skill
             response = skill.format_response(reply, actions, {"open_id": open_id})
@@ -150,7 +150,7 @@ class Orchestrator:
         messages.append({"role": "user", "content": user_message})
         return messages
 
-    def _run_skill_loop(self, skill, db, messages) -> tuple:
+    def _run_skill_loop(self, skill, db, messages, open_id: str = None) -> tuple:
         """Run LLM tool-calling loop for a given skill.
 
         Returns (final_reply, actions_list).
@@ -180,7 +180,9 @@ class Orchestrator:
                     tool_args = {}
                     logger.error(f"Failed to parse tool arguments: {tc.function.arguments}")
 
-                result = skill.execute_tool(db, tool_name, tool_args)
+                # Execute tool with context (for family skill)
+                context = {"open_id": open_id} if open_id else None
+                result = skill.execute_tool(db, tool_name, tool_args, context)
                 actions.append({"tool": tool_name, "args": tool_args, "result": result})
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 

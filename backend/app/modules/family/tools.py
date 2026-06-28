@@ -467,14 +467,22 @@ class FamilySkill:
         """Get tool definitions for this skill."""
         return get_family_tools()
 
-    def execute_tool(self, db: Session, tool_name: str, tool_args: Dict[str, Any]) -> str:
-        """Execute a tool for this skill."""
-        # Family tools need user_open_id from context
-        # This is called from orchestrator with context
-        import asyncio
+    def execute_tool(self, db: Session, tool_name: str, tool_args: Dict[str, Any], context: Dict = None) -> str:
+        """Execute a tool for this skill.
 
-        # Placeholder: will be integrated with orchestrator
-        return execute_family_tool(db, tool_name, tool_args, "placeholder_open_id")
+        Args:
+            db: Database session
+            tool_name: Tool name
+            tool_args: Tool arguments
+            context: Context dict containing user_open_id
+
+        Returns:
+            str: Tool result
+        """
+        # Get user_open_id from context
+        user_open_id = context.get("open_id") if context else "placeholder_open_id"
+
+        return execute_family_tool(db, tool_name, tool_args, user_open_id)
 
     def format_response(self, reply: str, actions: List[Dict], context: Dict) -> Dict:
         """Format response for Feishu."""

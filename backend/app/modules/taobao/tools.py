@@ -357,13 +357,14 @@ class TaobaoSkill:
         """Get tool definitions for this skill."""
         return get_taobao_tools()
 
-    def execute_tool(self, db: Session, tool_name: str, tool_args: Dict[str, Any]) -> str:
+    def execute_tool(self, db: Session, tool_name: str, tool_args: Dict[str, Any], context: Dict = None) -> str:
         """Execute a tool for this skill.
 
         Args:
             db: Database session
             tool_name: Name of tool to execute
             tool_args: Tool arguments
+            context: Context information (e.g., open_id)
 
         Returns:
             str: Tool execution result

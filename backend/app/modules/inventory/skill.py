@@ -192,7 +192,7 @@ class InventorySkill(BaseSkill):
         from app.modules.inventory.tools import get_inventory_tools
         return get_inventory_tools()
 
-    def execute_tool(self, db: Session, tool_name: str, tool_args: dict) -> str:
+    def execute_tool(self, db: Session, tool_name: str, tool_args: dict, context: dict = None) -> str:
         """Execute a tool call and return the result as a JSON string.
 
         Enhanced with:

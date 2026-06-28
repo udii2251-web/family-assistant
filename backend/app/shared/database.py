@@ -19,6 +19,8 @@ def init_db():
     from app.modules.inventory.models import ConsumptionRecord, PurchaseRecord, RestockAlert
     # Taobao module models
     from app.modules.taobao.models import TaobaoOrder, TaobaoOrderItem, TaobaoAuthStatus
+    # Family module models
+    from app.models.family import Family, FamilyMember as FamilyOrgMember
     # ProductComparison model is standalone, keep in shared location or move later
     try:
         from app.models.product_comparison import ProductComparison
