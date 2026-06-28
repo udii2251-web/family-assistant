@@ -114,14 +114,38 @@ def get_remaining_for_item(db: Session, item_id: int) -> float:
     return remaining
 
 
-def get_avg_daily_rate(db: Session, item_id: int) -> Optional[float]:
-    """Calculate average daily consumption rate for an item."""
+def get_avg_daily_rate(db: Session, item_id: int, buyer_open_id: str = None) -> Optional[float]:
+    """Calculate average daily consumption rate for an item.
+
+    Args:
+        db: Database session
+        item_id: Item ID
+        buyer_open_id: Feishu open_id of buyer (for personal items)
+
+    Returns:
+        Average daily consumption rate (quantity per day), or None if no data
+
+    Note:
+        - For shared items (is_shared=1): calculate based on ALL purchase/consumption records
+        - For personal items (is_shared=0): calculate based on specific buyer's records (if provided)
+    """
+    from app.modules.inventory.models import Item
+
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        return None
+
+    # Determine whether to filter by buyer (for personal items)
+    # TODO: Implement buyer-specific consumption tracking in ConsumptionRecord
+    # For now, all consumptions are treated as shared (no buyer tracking)
+
     records = (
         db.query(ConsumptionRecord)
         .filter(ConsumptionRecord.item_id == item_id)
         .order_by(ConsumptionRecord.record_date)
         .all()
     )
+
     if not records:
         return None
 

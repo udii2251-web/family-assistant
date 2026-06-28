@@ -49,6 +49,10 @@ class Item(Base):
     typical_size = Column(Float, nullable=True)  # typical purchase quantity
     target_audience = Column(String(20), default="all")  # all / child / dog
 
+    # 个性化库存管理字段
+    is_shared = Column(Integer, default=1)  # 1=共用物品(通知所有人), 0=个人专属(只通知购买者)
+    default_buyer_open_id = Column(String(100), nullable=True)  # 默认购买者的飞书open_id（个人专属物品）
+
 
 class PurchaseRecord(Base):
     """Purchase record (增加库存)."""
@@ -60,6 +64,10 @@ class PurchaseRecord(Base):
     unit = Column(String(20), nullable=False)
     purchase_date = Column(Date, nullable=False)
     remaining = Column(Float, nullable=True)  # remaining amount after purchase
+
+    # 个性化字段：记录购买者
+    buyer_open_id = Column(String(100), nullable=True)  # 购买者的飞书open_id
+    source = Column(String(20), default="manual")  # manual / taobao_sync / chat_import
 
 
 class ConsumptionRecord(Base):
